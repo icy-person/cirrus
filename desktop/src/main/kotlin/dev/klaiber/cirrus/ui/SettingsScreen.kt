@@ -1,37 +1,46 @@
 package dev.klaiber.cirrus.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,21 +49,35 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.klaiber.cirrus.data.remote.elevenlabs.ElevenLabsVoice
+import dev.klaiber.cirrus.data.remote.spotify.SpotifyCredentials
 import dev.klaiber.cirrus.di.AppContainer
-import dev.klaiber.cirrus.ui.components.PillButton
-import dev.klaiber.cirrus.ui.components.PillStyle
-import dev.klaiber.cirrus.ui.components.ScreenTopBar
-import dev.klaiber.cirrus.ui.components.readingMeasure
 import dev.klaiber.cirrus.domain.model.AppSettings
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import dev.klaiber.cirrus.domain.userMessage
+import dev.klaiber.cirrus.ui.components.Hairline
+import dev.klaiber.cirrus.ui.components.HelpBadge
+import dev.klaiber.cirrus.ui.components.HelpTooltip
+import dev.klaiber.cirrus.ui.components.OutlinedPanel
+import dev.klaiber.cirrus.ui.components.PillButton
+import dev.klaiber.cirrus.ui.components.PillStyle
+import dev.klaiber.cirrus.ui.components.ScreenTopBar
+import dev.klaiber.cirrus.ui.components.SectionLabel
+import dev.klaiber.cirrus.ui.components.readingMeasure
+import dev.klaiber.cirrus.ui.theme.ContainerShape
+import dev.klaiber.cirrus.ui.theme.LargeContainerShape
+import dev.klaiber.cirrus.ui.util.rememberClipboard
 import kotlinx.coroutines.launch
 import java.awt.Desktop
 import java.io.File
@@ -67,34 +90,36 @@ import java.io.File
  * least important anyway.
  */
 private val AppVersion: String =
-    AppContainer::class.java.`package`?.implementationVersion ?: "1.7.0"
+    AppContainer::class.java.`package`?.implementationVersion ?: "1.8.0"
 
 /**
- * Everything configurable, in the sections `SettingSwitch.path` names.
+ * The settings hub.
  *
- * The section headings are load-bearing rather than decorative: `describe_settings` hands the model
- * "Settings → Tools → Memory", and a heading that has drifted sends the user looking for a row that
- * is not there. Renaming one here means renaming it in `SettingsCatalog` too.
+ * Nine groups and two destinations, in place of the one long scroll this screen used to be. The
+ * old page was ordered by when each control was written, which put the context-window field below
+ * the GitHub token and made "where is the theme?" a scrolling exercise; a wide window renders that
+ * faithfully and does not make it scannable. Grouping costs one click and buys a screen you can
+ * read at a glance — and, as on the phone, it leaves an obvious place to put the next thing, which
+ * is exactly how the old one got so long.
  */
 @Composable
 fun SettingsScreen(
     container: AppContainer,
     onClose: () -> Unit,
+    onOpenSection: (SettingsSection) -> Unit,
     onOpenMemory: () -> Unit,
     onOpenAgents: () -> Unit,
-    onOpenMcpServers: () -> Unit,
     onRunSetup: () -> Unit,
     topInset: Dp = 0.dp,
     leadingInset: Dp = 0.dp,
 ) {
-    val scope = rememberCoroutineScope()
-    val repository = container.settingsRepository
-    // Both are `StateFlow`s the container loads before the first window, so they are read without
-    // an initial value — supplying one selects the plain-`Flow` overload and shows a default for
-    // the first frame, which here means every switch on the page starting off and snapping to its
-    // real position a frame later.
-    val settings by repository.settings.collectAsState()
-    val models by container.modelRepository.models.collectAsState()
+    // `collectAsState()` with no argument on a `StateFlow` the container loaded before the first
+    // window: supplying an initial value selects the plain-`Flow` overload and shows a default
+    // `AppSettings` for one composition, which here would read as the connection panel flashing
+    // "no API key" on every visit.
+    val settings by container.settingsRepository.settings.collectAsState()
+    val memoryCount by container.memoryRepository.activeCount.collectAsState(0)
+    val agents by container.agentRepository.agents.collectAsState(emptyList())
 
     Column(Modifier.fillMaxSize()) {
         ScreenTopBar(
@@ -103,366 +128,715 @@ fun SettingsScreen(
             topInset = topInset,
             leadingInset = leadingInset,
         )
-
-        // Centred on a measure rather than filled. A settings row stretched across a 1180pt window
-        // leaves its switch a hand's width from the label it belongs to, which is the one thing a
-        // settings list must never do.
-        LazyColumn(
-            Modifier.fillMaxSize(),
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            item {
-                Section(SettingsSection.MANAGE) {
-                    LinkRow(
-                        title = "Memory",
-                        summary = "Browse, edit, pin and retire what Cirrus remembers about you.",
+            Column(Modifier.readingMeasure()) {
+                ConnectionSummary(
+                    hasKey = settings.hasApiKey,
+                    host = settings.baseUrl,
+                    model = settings.defaultModel,
+                    onClick = { onOpenSection(SettingsSection.CONNECTION) },
+                )
+
+                SectionLabel("What Cirrus knows")
+                HubCard {
+                    HubRow(
+                        icon = SettingsDestination.MEMORY.icon,
+                        title = SettingsDestination.MEMORY.title,
+                        summary = if (memoryCount > 0) {
+                            "$memoryCount remembered"
+                        } else {
+                            SettingsDestination.MEMORY.summary
+                        },
                         onClick = onOpenMemory,
                     )
-                    LinkRow(
-                        title = "Agents",
-                        summary = "Prompts that run on a schedule and write their answers into a thread.",
+                    HubDivider()
+                    HubRow(
+                        icon = SettingsDestination.AGENTS.icon,
+                        title = SettingsDestination.AGENTS.title,
+                        summary = if (agents.isNotEmpty()) {
+                            "${agents.size} scheduled"
+                        } else {
+                            SettingsDestination.AGENTS.summary
+                        },
                         onClick = onOpenAgents,
                     )
-                    LinkRow(
-                        title = "MCP servers",
-                        summary = "Attach a Model Context Protocol server and use the tools it offers.",
-                        onClick = onOpenMcpServers,
-                    )
-                    LinkRow(
+                }
+
+                SectionLabel("Settings")
+                HubCard {
+                    SettingsSection.entries.forEachIndexed { index, section ->
+                        if (index > 0) HubDivider()
+                        HubRow(
+                            icon = section.icon,
+                            title = section.title,
+                            summary = section.summary,
+                            onClick = { onOpenSection(section) },
+                        )
+                    }
+                }
+
+                SectionLabel("Getting set up")
+                HubCard {
+                    // The wizard is where the connection is proved rather than merely typed, which
+                    // makes it the right answer to "it stopped working" as well as to "I am new
+                    // here".
+                    HubRow(
+                        icon = Icons.Outlined.AutoAwesome,
                         title = "Run setup again",
-                        summary = "The first-run wizard: host, key, model, and the optional extras.",
+                        summary = "Walk through the host, key and model, and test the connection",
                         onClick = onRunSetup,
                     )
                 }
-            }
 
-            item {
-                ConnectionSection(container = container, settings = settings)
-            }
-
-            item {
-                Section(SettingsSection.MODEL) {
-                    ModelRow(
-                        models = models.map { it.name },
-                        selected = settings.defaultModel,
-                        onSelect = { scope.launch { repository.setDefaultModel(it) } },
-                    )
-                    SwitchRow(
-                        title = "Auto-title conversations",
-                        summary = "Ask the model for a short title after the first exchange.",
-                        checked = settings.autoTitleConversations,
-                        onChange = { scope.launch { repository.setAutoTitle(it) } },
-                    )
-                    NumberRow(
-                        title = "Context messages",
-                        summary = "How many earlier messages to replay. Zero sends the whole thread.",
-                        value = settings.contextMessageLimit,
-                        onChange = { scope.launch { repository.setContextMessageLimit(it) } },
-                    )
-                }
-            }
-
-            item {
-                Section(SettingsSection.TOOLS) {
-                    SwitchRow(
-                        title = "Tools on by default",
-                        summary = "Whether a new conversation starts with web search and GitHub offered.",
-                        checked = settings.toolsEnabledByDefault,
-                        onChange = { scope.launch { repository.setToolsEnabledByDefault(it) } },
-                    )
-                    SwitchRow(
-                        title = "Memory",
-                        summary = "Remembering things about you between conversations, and recalling them.",
-                        checked = settings.memoryEnabled,
-                        onChange = { scope.launch { repository.setMemoryEnabled(it) } },
-                    )
-                    SwitchRow(
-                        title = "Notifications",
-                        summary = "Letting the model put something on the desktop notification tray.",
-                        checked = settings.notificationToolEnabled,
-                        onChange = { scope.launch { repository.setNotificationToolEnabled(it) } },
-                    )
-                    SwitchRow(
-                        title = "Shell and everyday tools",
-                        summary = "The date and time, a calendar month, this computer's details, and " +
-                            "safe shell commands in a private scratch folder.",
-                        checked = settings.shellToolsEnabled,
-                        onChange = { scope.launch { repository.setShellToolsEnabled(it) } },
-                    )
-                    SwitchRow(
-                        title = "Apps",
-                        summary = "Listing applications on this computer and opening one.",
-                        checked = settings.appControlEnabled,
-                        onChange = { scope.launch { repository.setAppControlEnabled(it) } },
-                    )
-                    SwitchRow(
-                        title = "Allow write actions",
-                        summary = "Tools that change something outside Cirrus and cannot be undone " +
-                            "from inside it — opening a GitHub issue, or committing a file.",
-                        checked = settings.writeToolsAllowed,
-                        onChange = { scope.launch { repository.setWriteToolsAllowed(it) } },
-                    )
-                    SwitchRow(
-                        title = "Nightly memory pass",
-                        summary = "Merges duplicate memories and retires what has been superseded. " +
-                            "Nothing is deleted — retiring is archiving, and the memory screen " +
-                            "restores anything.",
-                        checked = settings.memoryConsolidationEnabled,
-                        onChange = { scope.launch { repository.setMemoryConsolidationEnabled(it) } },
-                    )
-                    NumberRow(
-                        title = "Nightly pass hour",
-                        summary = "Local hour it runs at. Late enough that nobody is using the model.",
-                        value = settings.memoryConsolidationHour,
-                        onChange = { scope.launch { repository.setMemoryConsolidationHour(it) } },
-                    )
-                    NumberRow(
-                        title = "Web search results",
-                        summary = "How many results a search returns. More costs context.",
-                        value = settings.webSearchMaxResults,
-                        onChange = { scope.launch { repository.setWebSearchMaxResults(it) } },
-                    )
-                    NumberRow(
-                        title = "Tool rounds per turn",
-                        summary = "Bounds a model that would otherwise call tools forever.",
-                        value = settings.maxToolIterations,
-                        onChange = { scope.launch { repository.setMaxToolIterations(it) } },
-                    )
-                }
-            }
-
-            item {
-                SpeechSection(container = container, settings = settings)
-            }
-
-            item {
-                MusicSection(container = container, settings = settings)
-            }
-
-            item {
-                Section(SettingsSection.GITHUB) {
-                    SecretRow(
-                        title = "Personal access token",
-                        summary = "Kept in Cirrus's own data directory. A token with no scopes still " +
-                            "reads public repositories.",
-                        isSet = settings.hasGitHubToken,
-                        onSave = { scope.launch { repository.setGitHubToken(it) } },
-                        onClear = { scope.launch { repository.clearGitHubToken() } },
-                    )
-                    SwitchRow(
-                        title = "GitHub tools",
-                        summary = "Reading repositories, code, issues and pull requests.",
-                        checked = settings.gitHubToolsEnabled,
-                        onChange = { scope.launch { repository.setGitHubToolsEnabled(it) } },
-                    )
-                }
-            }
-
-            item {
-                Section(SettingsSection.APPEARANCE) {
-                    ThemeRow(
-                        selected = settings.themeMode,
-                        onSelect = { scope.launch { repository.setThemeMode(it) } },
-                    )
-                    SwitchRow(
-                        title = "Render markdown",
-                        summary = "Formatted answers rather than the raw text the model sent.",
-                        checked = settings.renderMarkdown,
-                        onChange = { scope.launch { repository.setRenderMarkdown(it) } },
-                    )
-                    SwitchRow(
-                        title = "Show generation stats",
-                        summary = "Tokens and speed under each answer.",
-                        checked = settings.showStats,
-                        onChange = { scope.launch { repository.setShowStats(it) } },
-                    )
-                    SwitchRow(
-                        title = "Send on Enter",
-                        summary = "Enter sends and Shift+Enter starts a line, rather than the reverse.",
-                        checked = settings.sendOnEnter,
-                        onChange = { scope.launch { repository.setSendOnEnter(it) } },
-                    )
-                    SwitchRow(
-                        title = "Suggested openers",
-                        summary = "Four starter prompts on an empty chat, written by your own model.",
-                        checked = settings.showStarterPrompts,
-                        onChange = { scope.launch { repository.setShowStarterPrompts(it) } },
-                    )
-                    SwitchRow(
-                        title = "Developer mode",
-                        summary = "Surfaces the exact request sent for each turn.",
-                        checked = settings.developerMode,
-                        onChange = { scope.launch { repository.setDeveloperMode(it) } },
-                    )
-                }
-            }
-
-            item {
-                AboutSection(container = container)
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = "Cirrus $AppVersion",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
 }
 
 /**
- * The connection, and proof that it works.
+ * One group of controls, on its own screen.
  *
- * The host and key are saved *before* the catalogue is fetched, because the credential holder the
- * HTTP layer reads is fed from the same store — testing an unsaved key would test the old one.
+ * Every control here is the one that was already on the long page; only where it lives has
+ * changed. The two additions are the sections that page never had — Diagnostics and Data — both of
+ * which existed on the phone and neither of which had anywhere obvious to go when the screen was
+ * one scroll ordered by age.
  */
 @Composable
-private fun ConnectionSection(container: AppContainer, settings: AppSettings) {
-    val scope = rememberCoroutineScope()
-    val repository = container.settingsRepository
+fun SettingsSectionScreen(
+    section: SettingsSection,
+    container: AppContainer,
+    onBack: () -> Unit,
+    onOpenMcpServers: () -> Unit,
+    topInset: Dp = 0.dp,
+    leadingInset: Dp = 0.dp,
+) {
+    val settings by container.settingsRepository.settings.collectAsState()
 
-    var baseUrl by remember(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
-    var apiKey by remember { mutableStateOf("") }
-    var testing by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<String?>(null) }
-
-    Section(SettingsSection.CONNECTION) {
-        OutlinedTextField(
-            value = baseUrl,
-            onValueChange = { baseUrl = it; result = null },
-            label = { Text("Ollama host") },
-            placeholder = { Text("https://ollama.com") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp),
+    Column(Modifier.fillMaxSize()) {
+        ScreenTopBar(
+            title = section.title,
+            onBack = onBack,
+            topInset = topInset,
+            leadingInset = leadingInset,
         )
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it; result = null },
-            label = { Text(if (settings.hasApiKey) "API key (saved)" else "API key") },
-            placeholder = { Text("Leave blank for a local host") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(
-                enabled = !testing,
-                onClick = {
-                    scope.launch {
-                        testing = true
-                        result = null
-                        repository.setBaseUrl(baseUrl)
-                        if (apiKey.isNotBlank()) {
-                            repository.setApiKey(apiKey)
-                            apiKey = ""
-                        }
-                        result = container.modelRepository.refresh().fold(
-                            onSuccess = { models -> "Connected — ${models.size} models available." },
-                            onFailure = { error -> error.userMessage() },
-                        )
-                        testing = false
-                    }
-                },
-            ) {
-                Text("Save and test")
-            }
-            if (settings.hasApiKey) {
-                TextButton(onClick = { scope.launch { repository.clearApiKey() } }) {
-                    Text("Clear key")
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .padding(bottom = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(Modifier.readingMeasure()) {
+                when (section) {
+                    SettingsSection.CONNECTION -> ConnectionBody(container, settings)
+                    SettingsSection.GENERATION -> GenerationBody(container, settings)
+                    SettingsSection.TOOLS -> ToolsBody(container, settings)
+                    SettingsSection.INTEGRATIONS -> IntegrationsBody(container, settings, onOpenMcpServers)
+                    SettingsSection.MUSIC -> MusicBody(container, settings)
+                    SettingsSection.VOICE -> VoiceBody(container, settings)
+                    SettingsSection.APPEARANCE -> AppearanceBody(container, settings)
+                    SettingsSection.DIAGNOSTICS -> DiagnosticsBody(container, settings)
+                    SettingsSection.DATA -> DataBody(container)
                 }
             }
-            if (testing) {
-                Spacer(Modifier.width(8.dp))
-                CircularProgressIndicator(Modifier.height(16.dp).width(16.dp))
-            }
         }
-        result?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The hub's own furniture
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The one thing worth showing without a click: whether Cirrus can reach a model at all. */
+@Composable
+private fun ConnectionSummary(hasKey: Boolean, host: String, model: String, onClick: () -> Unit) {
+    val connected = hasKey || !host.contains("ollama.com")
+
+    // Connected is the ordinary case, so it gets the ordinary treatment: an outlined row like every
+    // other. Only the failure is tinted. A green-equivalent "all is well" panel spends the reader's
+    // attention on the state that needed none of it.
+    OutlinedPanel(
+        onClick = onClick,
+        shape = LargeContainerShape,
+        color = if (connected) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.errorContainer
+        },
+        borderColor = if (connected) {
+            MaterialTheme.colorScheme.outlineVariant
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+    ) {
+        val onContainer = if (connected) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onErrorContainer
+        }
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (connected) {
+                    Icons.Outlined.CheckCircle
+                } else {
+                    Icons.Outlined.ErrorOutline
+                },
+                contentDescription = null,
+                tint = onContainer,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = if (connected) "Connected" else "No API key yet",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = onContainer,
+                )
+                Text(
+                    text = buildString {
+                        append(host.removePrefix("https://").removePrefix("http://"))
+                        if (model.isNotBlank()) append(" · ").append(model)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (connected) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        onContainer
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
             )
         }
     }
 }
 
+/** A group of rows as one bordered object, hairline-separated — the reference site's list idiom. */
+@Composable
+private fun HubCard(content: @Composable ColumnScope.() -> Unit) {
+    OutlinedPanel(shape = LargeContainerShape, modifier = Modifier.fillMaxWidth()) {
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun HubDivider() {
+    Hairline(startIndent = 56.dp)
+}
+
+@Composable
+private fun HubRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    summary: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The sections
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Which voice reads an answer back, and the key the good one needs.
+ * Where a connection state lives while somebody is proving one.
  *
- * The system voice is offered first and selected by default because it always works without
- * setting anything up — or rather, nearly always: unlike Android, a Linux desktop can genuinely
- * have no engine installed, which is why the row says what it found rather than assuming.
+ * Local to the screen rather than in a repository, because it is a fact about this visit — the
+ * phone keeps it in a `SettingsViewModel` for exactly as long as the screen is up, and this is
+ * that lifetime written a different way.
+ */
+private sealed interface ConnectionStatus {
+    data object Idle : ConnectionStatus
+
+    data object Testing : ConnectionStatus
+
+    data class Success(val model: String) : ConnectionStatus
+
+    data class Failure(val message: String) : ConnectionStatus
+}
+
+/**
+ * The connection, and proof that it works.
+ *
+ * Key first and host second, as on the phone. The order looks backwards written down — the host is
+ * where requests go, so surely it comes first — but the hosted API is what almost everybody is
+ * setting up, and for them the host is already right and the key is the entire job. Somebody
+ * pointing Cirrus at a machine on their own network is the rarer case and is looking for the field
+ * rather than falling into it.
+ *
+ * The key is saved *before* the connection is tested, because the credential holder the HTTP layer
+ * reads is fed from the same store — testing an unsaved key tests the old one. The host is applied
+ * the same way and by its own button: two secrets and an address committed together by one control
+ * meant no way to correct a host without re-entering a key.
  */
 @Composable
-private fun SpeechSection(container: AppContainer, settings: AppSettings) {
+private fun ConnectionBody(container: AppContainer, settings: AppSettings) {
     val scope = rememberCoroutineScope()
     val repository = container.settingsRepository
 
-    Section(SettingsSection.SPEECH) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Voice", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            SpeechEngine.entries.forEach { engine ->
-                val chosen = engine == settings.speechEngine
-                TextButton(onClick = { scope.launch { repository.setSpeechEngine(engine) } }) {
-                    Text(
-                        text = engine.label,
-                        fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal,
-                        color = if (chosen) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+    var host by remember(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
+    var status by remember { mutableStateOf<ConnectionStatus>(ConnectionStatus.Idle) }
+
+    SecretField(
+        label = "API key",
+        fieldLabel = "Ollama API key",
+        replaceLabel = "Replace API key",
+        placeholder = "ollama api key",
+        saveLabel = "Save key",
+        help = "Your Ollama API key, needed for the hosted API at ollama.com. A local Ollama " +
+            "instance usually needs no key at all. Unlike the phone build there is no Keystore " +
+            "here to wrap it in: it is a file in Cirrus's own data folder, readable by anything " +
+            "running as you. Settings → Data names the folder.",
+        isSet = settings.hasApiKey,
+        footer = "",
+        onSave = { key ->
+            scope.launch {
+                repository.setApiKey(key)
+                status = ConnectionStatus.Idle
+                // A new key usually means a different account and therefore a different catalogue.
+                container.modelRepository.refresh()
             }
-        }
-        Text(
-            text = settings.speechEngine.description,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        },
+        onClear = {
+            scope.launch {
+                repository.clearApiKey()
+                status = ConnectionStatus.Idle
+            }
+        },
+        trailing = {
+            PillButton(
+                label = "Test",
+                style = PillStyle.Secondary,
+                enabled = settings.hasApiKey && status != ConnectionStatus.Testing,
+                onClick = {
+                    scope.launch {
+                        status = ConnectionStatus.Testing
+                        status = testConnection(container)
+                    }
+                },
+            )
+        },
+    )
+
+    Spacer(Modifier.height(6.dp))
+    ConnectionStatusRow(hasKey = settings.hasApiKey, status = status)
+
+    Spacer(Modifier.height(12.dp))
+    LabelWithHelp(
+        label = "Host",
+        help = "Where every request goes. Use https://ollama.com for the hosted API, or " +
+            "http://<address>:11434 for an Ollama instance on your own machine — your hardware, " +
+            "your models, no key. A trailing /api is stripped automatically.",
+    )
+    OutlinedTextField(
+        value = host,
+        onValueChange = { host = it },
+        label = { Text("Host") },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        shape = ContainerShape,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        text = "Point at a local instance (http://localhost:11434) to use your own hardware.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+    // Shown only once the field has been changed, which is what makes it an answer to "did that
+    // save?" rather than a button sitting permanently under a field nobody has touched.
+    if (host != settings.baseUrl) {
+        Spacer(Modifier.height(6.dp))
+        PillButton(
+            label = "Apply host",
+            onClick = {
+                scope.launch {
+                    repository.setBaseUrl(host)
+                    status = ConnectionStatus.Idle
+                    container.modelRepository.refresh()
+                }
+            },
         )
-        SwitchRow(
-            title = "Read aloud",
-            summary = "Offers a speak button on each answer.",
-            checked = settings.readAloudEnabled,
-            onChange = { scope.launch { repository.setReadAloudEnabled(it) } },
-        )
-        SecretRow(
-            title = "ElevenLabs API key",
-            summary = "Needed only for the ElevenLabs voice. Without one, Cirrus falls back to " +
-                "this computer's own engine rather than failing.",
-            isSet = settings.hasElevenLabsKey,
-            onSave = { scope.launch { repository.setElevenLabsKey(it) } },
-            onClear = { scope.launch { repository.clearElevenLabsKey() } },
-        )
-        // The picker the Android build has had all along. `ElevenLabsClient.voices()` came across
-        // with the rest of the client and then had nothing calling it, which left the desktop
-        // build able to synthesise in exactly one voice — the account default — with no way to say
-        // so and no way to change it.
-        VoiceRow(container = container, settings = settings)
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).padding(end = 16.dp)) {
-                Text("ElevenLabs model", style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/**
+ * Reaches the host with the credentials as they now stand, and says which model answered.
+ *
+ * Naming the model is the point: "connected" on its own is also what a host with an empty
+ * catalogue would say, and a catalogue is what the next screen needs.
+ */
+private suspend fun testConnection(container: AppContainer): ConnectionStatus {
+    val configured = container.settingsRepository.settings.value.defaultModel
+    val model = configured.ifBlank { container.modelRepository.models.value.firstOrNull()?.name.orEmpty() }
+    if (model.isBlank()) container.modelRepository.refresh()
+    val resolved = model.ifBlank { container.modelRepository.models.value.firstOrNull()?.name.orEmpty() }
+    if (resolved.isBlank()) {
+        return ConnectionStatus.Failure("Could not list any models from this host.")
+    }
+    return container.ollamaClient.validateCredentials(resolved).fold(
+        onSuccess = { ConnectionStatus.Success(resolved) },
+        onFailure = { ConnectionStatus.Failure(it.userMessage()) },
+    )
+}
+
+/** One line under the key field, saying where the connection actually stands. */
+@Composable
+private fun ConnectionStatusRow(hasKey: Boolean, status: ConnectionStatus) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        when (status) {
+            ConnectionStatus.Idle -> Text(
+                text = if (hasKey) {
+                    "A key is stored, as a file in Cirrus's own data folder."
+                } else {
+                    "Create one at ollama.com/settings/keys."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            ConnectionStatus.Testing -> {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.size(8.dp))
                 Text(
-                    text = ElevenLabsModel.fromId(settings.elevenLabsModelId).description,
+                    text = "Testing…",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            var open by remember { mutableStateOf(false) }
-            Box {
-                TextButton(onClick = { open = true }) {
-                    Text(ElevenLabsModel.fromId(settings.elevenLabsModelId).label)
-                }
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    ElevenLabsModel.entries.forEach { model ->
-                        DropdownMenuItem(
-                            text = { Text(model.label) },
-                            onClick = {
-                                scope.launch { repository.setElevenLabsModel(model) }
-                                open = false
-                            },
-                        )
-                    }
-                }
+
+            is ConnectionStatus.Success -> {
+                Icon(
+                    imageVector = Icons.Outlined.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(15.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    text = "Connected — reached ${status.model}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            is ConnectionStatus.Failure -> {
+                Icon(
+                    imageVector = Icons.Outlined.ErrorOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(15.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    text = status.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
+}
+
+/** Everything about how a chat behaves before a single word has been typed into it. */
+@Composable
+private fun GenerationBody(container: AppContainer, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    val repository = container.settingsRepository
+    val models by container.modelRepository.models.collectAsState()
+
+    ModelDropdownRow(
+        selected = settings.defaultModel,
+        models = models.map { it.name },
+        onSelect = { scope.launch { repository.setDefaultModel(it) } },
+    )
+    SwitchRow(
+        title = "Web tools by default",
+        subtitle = "Enable web search and page fetch for new conversations",
+        help = "Lets the model run web searches and fetch pages mid-answer. It decides when to " +
+            "call them, and each call is an extra round trip to your host. You can still flip " +
+            "this per conversation from the composer.",
+        checked = settings.toolsEnabledByDefault,
+        onCheckedChange = { scope.launch { repository.setToolsEnabledByDefault(it) } },
+    )
+    SwitchRow(
+        title = "Auto-title conversations",
+        subtitle = "Name threads from their content, and keep the name current",
+        help = "Cirrus names a new thread from its first exchange, then re-summarises it as the " +
+            "conversation grows — at most once every 30 minutes, so a long session costs a " +
+            "handful of short requests rather than one per turn. Rename a thread yourself and it " +
+            "is never overwritten.",
+        checked = settings.autoTitleConversations,
+        onCheckedChange = { scope.launch { repository.setAutoTitle(it) } },
+    )
+    SwitchRow(
+        title = "Suggested openers",
+        subtitle = "Four things to try on an empty conversation",
+        help = "A blank composer asks a question it does not answer. The suggestions are matched " +
+            "to what you have switched on — nothing offers to read your repositories unless a " +
+            "GitHub token is configured. Turn them off once you know what you want to type.",
+        checked = settings.showStarterPrompts,
+        onCheckedChange = { scope.launch { repository.setShowStarterPrompts(it) } },
+    )
+    SwitchRow(
+        title = "Send on Enter",
+        subtitle = "Otherwise Enter starts a line and you click send",
+        help = "Turns Enter into send and Shift+Enter into a newline. Handy for short " +
+            "back-and-forth chats, awkward when you write multi-line prompts.",
+        checked = settings.sendOnEnter,
+        onCheckedChange = { scope.launch { repository.setSendOnEnter(it) } },
+    )
+    StepperRow(
+        title = "Context messages",
+        subtitle = if (settings.contextMessageLimit == 0) {
+            "Sending the full thread every turn"
+        } else {
+            "Sending the last ${settings.contextMessageLimit} messages"
+        },
+        help = "How much of the thread is replayed with every turn. A smaller number means " +
+            "cheaper, faster requests but a shorter memory: the model literally cannot see what " +
+            "fell outside the window. \"All\" sends everything and lets the model's own context " +
+            "window do the truncating.",
+        value = settings.contextMessageLimit.toFloat(),
+        range = 0f..100f,
+        steps = 19,
+        format = { if (it.toInt() == 0) "all" else it.toInt().toString() },
+        onChange = { scope.launch { repository.setContextMessageLimit(it.toInt()) } },
+    )
+}
+
+/**
+ * The tools that do not leave this computer, and the one switch that governs the ones that do.
+ *
+ * Location is absent, and deliberately: no tool in this build answers it and there is no
+ * permission to ask for. A switch the model can read about is a capability it will offer, so one
+ * with nothing behind it is worse than no switch at all — `SettingsCatalogTest` asserts it stays
+ * gone.
+ */
+@Composable
+private fun ToolsBody(container: AppContainer, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    val repository = container.settingsRepository
+
+    SwitchRow(
+        title = "Shell and everyday tools",
+        subtitle = "The clock, the calendar, this computer's details, and safe commands",
+        help = "Gives the model four things it otherwise has to guess at: what the date and time " +
+            "are, how a month is laid out, what this computer is, and a shell for the small " +
+            "mechanical jobs — counting, sorting, checksums. The shell runs in a scratch folder " +
+            "inside Cirrus's own data directory and can reach nothing outside it: absolute paths, " +
+            "\"..\" and command substitution are refused before anything runs, and only a fixed " +
+            "list of programs is allowed at all. Nothing here touches the network, so it is " +
+            "offered whatever the per-conversation tools switch says.",
+        checked = settings.shellToolsEnabled,
+        onCheckedChange = { scope.launch { repository.setShellToolsEnabled(it) } },
+    )
+    SwitchRow(
+        title = "Apps",
+        subtitle = "List what is installed on this computer, and open one",
+        help = "Off by default, because these are the local tools that act rather than answer — " +
+            "opening an app puts it in front of whatever you were reading. Installing is not " +
+            "something it can do by itself.",
+        checked = settings.appControlEnabled,
+        onCheckedChange = { scope.launch { repository.setAppControlEnabled(it) } },
+    )
+    SwitchRow(
+        title = "Memory",
+        subtitle = "Remember things about you between conversations",
+        help = "Lets the model save durable facts — how you like to work, what you are building, " +
+            "who people are — and look them up later. Everything it keeps is on the Memory " +
+            "screen, where you can read, edit or retire any of it. Nothing leaves this computer.",
+        checked = settings.memoryEnabled,
+        onCheckedChange = { scope.launch { repository.setMemoryEnabled(it) } },
+    )
+    SwitchRow(
+        title = "Nightly memory tidy-up",
+        subtitle = "Merge duplicates and retire what has been superseded",
+        help = "Once a night, Cirrus reads the conversations you have had since the last pass, " +
+            "harvests anything durable, then merges near-duplicate memories and retires ones that " +
+            "have been overtaken. Nothing is deleted — retiring is archiving, and the Memory " +
+            "screen restores anything. Unlike the phone, this only runs while Cirrus is open.",
+        checked = settings.memoryConsolidationEnabled,
+        onCheckedChange = { scope.launch { repository.setMemoryConsolidationEnabled(it) } },
+        enabled = settings.memoryEnabled,
+    )
+    StepperRow(
+        title = "Nightly pass hour",
+        subtitle = "Runs at ${"%02d".format(settings.memoryConsolidationHour)}:00, local time",
+        help = "Late enough that nobody is using the model, early enough that the machine is " +
+            "probably still awake. A desktop that was asleep or shut down simply misses the pass " +
+            "and takes the next one — a fortnight of stale catch-up at launch would be worse.",
+        value = settings.memoryConsolidationHour.toFloat(),
+        range = 0f..23f,
+        steps = 22,
+        format = { "%02d:00".format(it.toInt()) },
+        onChange = { scope.launch { repository.setMemoryConsolidationHour(it.toInt()) } },
+        enabled = settings.memoryConsolidationEnabled && settings.memoryEnabled,
+    )
+    SwitchRow(
+        title = "Notifications",
+        subtitle = "Let a reply reach you when you are not looking at Cirrus",
+        help = "Mostly for scheduled agents: an answer written at 3am is worthless if nobody " +
+            "knows it exists. In an ordinary chat the model is told not to notify you about " +
+            "something you are already reading.",
+        checked = settings.notificationToolEnabled,
+        onCheckedChange = { scope.launch { repository.setNotificationToolEnabled(it) } },
+    )
+    SwitchRow(
+        title = "Allow write actions",
+        subtitle = "One switch for anything that changes something outside Cirrus",
+        help = "Off by default, and worth leaving off. It governs every integration at once: " +
+            "opening a GitHub issue, committing a file, editing a Spotify playlist, and any MCP " +
+            "tool that has not declared itself read-only. Reading is recoverable and writing is " +
+            "not, and a tool call is decided by a model rather than by you. With this off those " +
+            "tools are not offered at all, so nothing can try and fail — everything read-only " +
+            "still works.",
+        checked = settings.writeToolsAllowed,
+        onCheckedChange = { scope.launch { repository.setWriteToolsAllowed(it) } },
+    )
+    StepperRow(
+        title = "Search results",
+        subtitle = "How many results web_search returns per call",
+        help = "More results give the model more to work with, but each one is pasted into the " +
+            "conversation and eats context the model could be using to think.",
+        value = settings.webSearchMaxResults.toFloat(),
+        range = 1f..10f,
+        steps = 8,
+        format = { it.toInt().toString() },
+        onChange = { scope.launch { repository.setWebSearchMaxResults(it.toInt()) } },
+    )
+    StepperRow(
+        title = "Max tool rounds",
+        subtitle = "Upper bound on back-and-forth tool calls in one turn",
+        help = "A model can search, read the results, then search again. This caps how many of " +
+            "those rounds one turn may take before Cirrus stops the loop, so a model that keeps " +
+            "searching forever cannot run up your bill.",
+        value = settings.maxToolIterations.toFloat(),
+        range = 1f..20f,
+        steps = 18,
+        format = { it.toInt().toString() },
+        onChange = { scope.launch { repository.setMaxToolIterations(it.toInt()) } },
+    )
+}
+
+/** GitHub, and the MCP servers that are the other way tools get here. */
+@Composable
+private fun IntegrationsBody(
+    container: AppContainer,
+    settings: AppSettings,
+    onOpenMcpServers: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val repository = container.settingsRepository
+    val servers by container.mcpServerRepository.current.collectAsState()
+    val bindings by container.mcpServerRepository.bindings.collectAsState()
+
+    SecretField(
+        label = "Personal access token",
+        fieldLabel = "GitHub token",
+        replaceLabel = "Replace token",
+        placeholder = "github_pat_… or ghp_…",
+        saveLabel = "Save token",
+        help = "A fine-grained or classic GitHub token. Classic tokens need the `repo` scope to " +
+            "reach private repositories; a fine-grained token needs read access to Contents, " +
+            "Issues and Pull requests, plus write on those you want the model to be able to " +
+            "change. Create one at github.com/settings/tokens. Kept in Cirrus's own data folder — " +
+            "there is no Keystore on the desktop, so this is a file readable by anything running " +
+            "as you. It is sent to api.github.com and nowhere else; the MCP transports " +
+            "deliberately use a client with no auth interceptor so an attached server can never " +
+            "receive it.",
+        isSet = settings.hasGitHubToken,
+        footer = if (settings.hasGitHubToken) {
+            "A token is stored, as a file in Cirrus's own data folder."
+        } else {
+            "Without a token the GitHub tools stay hidden from the model."
+        },
+        onSave = { scope.launch { repository.setGitHubToken(it) } },
+        onClear = { scope.launch { repository.clearGitHubToken() } },
+    )
+    SwitchRow(
+        title = "GitHub tools",
+        subtitle = "Let the model read your repositories, issues and pull requests",
+        help = "Adds tools the model can call mid-answer: list repositories, search code, read " +
+            "files, and read issues and pull requests — private ones included, as far as your " +
+            "token reaches. Requests go to api.github.com and nowhere else, and your Ollama key " +
+            "is never sent there.",
+        checked = settings.gitHubToolsEnabled,
+        onCheckedChange = { scope.launch { repository.setGitHubToolsEnabled(it) } },
+        enabled = settings.hasGitHubToken,
+    )
+    Text(
+        text = "Write actions — opening issues, commenting, committing — are governed by one " +
+            "switch for every integration, at Settings → Tools → Allow write actions.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+    )
+
+    NavigationRow(
+        title = "MCP servers",
+        subtitle = mcpSubtitle(servers.size, bindings.size),
+        help = "Attach a Model Context Protocol server and its tools become available to the " +
+            "model alongside Cirrus's own. Each server is reached and asked what it offers before " +
+            "it is saved, and its token is only ever sent to it. A server that does not annotate " +
+            "its tools as read-only counts as writing, and offers nothing until writes are allowed.",
+        onClick = onOpenMcpServers,
+    )
 }
 
 /**
@@ -471,422 +845,302 @@ private fun SpeechSection(container: AppContainer, settings: AppSettings) {
  * In that order because each step is useless without the one before it, and a switch that can be
  * turned on before there is an account behind it produces exactly the "on, but not set up yet"
  * state the catalogue had to grow a vocabulary for.
+ *
+ * The redirect URI gets a panel of its own with a copy button, rather than a mention in a
+ * paragraph, because it is the one value that has to match on both ends character for character,
+ * it is invisible from Spotify's side, and getting it wrong produces an error on Spotify's own
+ * page that never mentions Cirrus at all. It is also longer and fiddlier here than on the phone —
+ * a loopback address with a port, not a tidy `cirrus://` scheme — which makes it the one string on
+ * this screen nobody should be retyping by eye.
  */
 @Composable
-private fun MusicSection(container: AppContainer, settings: AppSettings) {
+private fun MusicBody(container: AppContainer, settings: AppSettings) {
     val scope = rememberCoroutineScope()
     val repository = container.settingsRepository
+    val clipboard = rememberClipboard()
 
     var clientId by remember(settings.spotifyClientId) { mutableStateOf(settings.spotifyClientId) }
     var signingIn by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
 
-    Section(SettingsSection.MUSIC) {
-        Text(
-            text = "Cirrus ships no Spotify client ID — an app you can unzip cannot keep a secret. " +
-                "Create one at developer.spotify.com and add " +
-                dev.klaiber.cirrus.data.remote.spotify.SpotifyCredentials.REDIRECT_URI +
-                " as a redirect URI.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Column {
+        LabelWithHelp(
+            label = "Client ID",
+            help = "Spotify does not hand out a shared key for apps like this one, so Cirrus uses " +
+                "yours. Create an app at developer.spotify.com/dashboard — it takes a minute and " +
+                "costs nothing — add the redirect URI below to it, and paste the client ID here. " +
+                "There is no client secret: the sign-in uses PKCE, which is designed for apps " +
+                "that cannot keep one, and a desktop app is a zip file somebody can open.",
         )
-        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = clientId,
             onValueChange = { clientId = it },
-            label = { Text("Client ID") },
+            label = { Text("Spotify client ID") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(
-                enabled = clientId.trim() != settings.spotifyClientId,
+        if (clientId.trim() != settings.spotifyClientId) {
+            Spacer(Modifier.height(8.dp))
+            PillButton(
+                label = "Save client ID",
+                enabled = clientId.isNotBlank(),
                 onClick = { scope.launch { repository.setSpotifyClientId(clientId) } },
-            ) {
-                Text("Save client ID")
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedPanel(shape = ContainerShape, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Text("Redirect URI", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = SpotifyCredentials.REDIRECT_URI,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Add this to your Spotify app, exactly as written. The port is fixed " +
+                        "because Spotify matches the redirect character for character.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                PillButton(
+                    label = "Copy",
+                    style = PillStyle.Secondary,
+                    onClick = { clipboard.copy(SpotifyCredentials.REDIRECT_URI) },
+                )
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             if (settings.hasSpotifyAccount) {
-                TextButton(onClick = { scope.launch { container.spotifySession.signOut() } }) {
-                    Text("Sign out")
-                }
+                PillButton(
+                    label = "Disconnect",
+                    style = PillStyle.Ghost,
+                    onClick = { scope.launch { container.spotifySession.signOut() } },
+                )
             } else {
-                TextButton(
+                PillButton(
+                    label = "Connect Spotify",
                     enabled = settings.spotifyClientId.isNotBlank() && !signingIn,
                     onClick = {
                         scope.launch {
                             signingIn = true
                             result = null
                             result = container.spotifySession.signIn().fold(
-                                onSuccess = { name -> "Signed in as $name." },
+                                onSuccess = { name -> "Connected as $name." },
                                 onFailure = { error -> error.userMessage() },
                             )
                             signingIn = false
                         }
                     },
-                ) {
-                    Text("Connect Spotify")
-                }
+                )
             }
             if (signingIn) {
-                Spacer(Modifier.width(8.dp))
-                CircularProgressIndicator(Modifier.height(16.dp).width(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "Finish the sign-in in your browser.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(Modifier.width(12.dp))
+                CircularProgressIndicator(Modifier.size(16.dp))
             }
         }
-        (result ?: settings.spotifyAccountName.takeIf { it.isNotBlank() }?.let { name ->
-            if (settings.spotifyPremium) "Signed in as $name (Premium)." else "Signed in as $name."
-        })?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        SwitchRow(
-            title = "Spotify",
-            summary = "Searching Spotify, your playlists and saved music, what is playing, and " +
-                "playback control. Playback needs Premium; Spotify answers 403 without it.",
-            checked = settings.spotifyEnabled,
-            onChange = { scope.launch { repository.setSpotifyEnabled(it) } },
-        )
-    }
-}
-
-@Composable
-private fun Section(section: SettingsSection, content: @Composable () -> Unit) {
-    // The measure is applied once, here, rather than at each of the dozen call sites. Every
-    // section is a column of label-and-control rows and every one of them wants the same width.
-    Column(Modifier.readingMeasure().padding(bottom = 20.dp)) {
         Text(
-            text = section.title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        content()
-    }
-}
-
-/** A row that goes somewhere, rather than changing something here. */
-@Composable
-private fun LinkRow(title: String, summary: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun SwitchRow(
-    title: String,
-    summary: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-@Composable
-private fun NumberRow(
-    title: String,
-    summary: String,
-    value: Int,
-    onChange: (Int) -> Unit,
-) {
-    // The field holds text rather than the number, so clearing it to type a new one does not
-    // momentarily save a zero.
-    var text by remember(value) { mutableStateOf(value.toString()) }
-
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        OutlinedTextField(
-            value = text,
-            onValueChange = { entry ->
-                text = entry.filter(Char::isDigit).take(3)
-                text.toIntOrNull()?.let(onChange)
+            text = result ?: when {
+                settings.spotifyClientId.isBlank() -> "Add a client ID first."
+                signingIn -> "Finish the sign-in in your browser."
+                !settings.hasSpotifyAccount ->
+                    "Opens Spotify in your browser to sign in, and listens on " +
+                        "${SpotifyCredentials.REDIRECT_URI} for just as long as that takes."
+                settings.spotifyPremium ->
+                    "Connected as ${settings.spotifyAccountName} · Premium."
+                // The phone points a free account at `media_control`, which drives Android's own
+                // media keys. There is no such tool here, so this says what is true rather than
+                // naming a fallback this build does not have.
+                else -> "Connected as ${settings.spotifyAccountName}. This account is not " +
+                    "Premium, so Spotify will refuse playback control — searching, your library " +
+                    "and what is playing all still work."
             },
-            singleLine = true,
-            modifier = Modifier.width(96.dp),
-        )
-    }
-}
-
-@Composable
-private fun SecretRow(
-    title: String,
-    summary: String,
-    isSet: Boolean,
-    onSave: (String) -> Unit,
-    onClear: () -> Unit,
-) {
-    var entry by remember { mutableStateOf("") }
-
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        Text(
-            text = summary,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
         )
+
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = entry,
-                onValueChange = { entry = it },
-                placeholder = { Text(if (isSet) "Saved — type to replace" else "Not set") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.weight(1f).widthIn(max = 420.dp),
-            )
-            TextButton(
-                enabled = entry.isNotBlank(),
-                onClick = { onSave(entry); entry = "" },
-            ) {
-                Text("Save")
-            }
-            if (isSet) {
-                TextButton(onClick = onClear) { Text("Clear") }
-            }
-        }
+        SwitchRow(
+            title = "Spotify tools",
+            subtitle = "Search, playlists, what is playing, and playback control",
+            help = "Offers the model five Spotify tools: searching the catalogue, reading your " +
+                "playlists and saved music, seeing what is playing, controlling playback, and " +
+                "editing playlists. Editing needs the write switch under Tools as well. These go " +
+                "to api.spotify.com and nowhere else, and no other key of yours is ever sent " +
+                "there.",
+            checked = settings.spotifyEnabled,
+            onCheckedChange = { scope.launch { repository.setSpotifyEnabled(it) } },
+            enabled = settings.hasSpotifyAccount,
+        )
     }
 }
 
+/**
+ * Reading answers aloud, and which voice does it.
+ *
+ * The phone's counterpart also owns dictation. There is none here — `SpeechRecognizer` has no
+ * desktop equivalent worth shipping and a bundled model would dwarf the app — so this section is
+ * half the size of Android's, and says what it does rather than advertising a missing control.
+ */
 @Composable
-private fun ModelRow(
-    models: List<String>,
-    selected: String,
-    onSelect: (String) -> Unit,
-) {
-    var open by remember { mutableStateOf(false) }
+private fun VoiceBody(container: AppContainer, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    val repository = container.settingsRepository
 
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text("Default model", style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = "What a new conversation starts on.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    SwitchRow(
+        title = "Read answers aloud",
+        subtitle = "Show a speak button under finished replies",
+        help = "Adds a control that reads a reply out. What gets spoken is not the raw markdown: " +
+            "code blocks are announced rather than dictated, links are read as \"link\", tables " +
+            "are read as heading-and-value pairs, and maths is spoken as words — x squared, not " +
+            "x two.",
+        checked = settings.readAloudEnabled,
+        onCheckedChange = { scope.launch { repository.setReadAloudEnabled(it) } },
+    )
+    if (settings.readAloudEnabled) {
+        SpeechEngineSelector(
+            selected = settings.speechEngine,
+            onSelect = { scope.launch { repository.setSpeechEngine(it) } },
+        )
+        if (settings.speechEngine == SpeechEngine.ELEVENLABS) {
+            SecretField(
+                label = "ElevenLabs API key",
+                fieldLabel = "ElevenLabs key",
+                replaceLabel = "Replace key",
+                placeholder = "sk_…",
+                saveLabel = "Save key",
+                help = "From elevenlabs.io/app/settings/api-keys. Sent only to " +
+                    "api.elevenlabs.io — never to Ollama, and your Ollama key is never sent to " +
+                    "ElevenLabs. The desktop asks for raw PCM rather than MP3, because the JVM " +
+                    "decodes no MP3 at all and shipping a decoder to play a sentence would be a " +
+                    "strange trade.",
+                isSet = settings.hasElevenLabsKey,
+                footer = if (settings.hasElevenLabsKey) {
+                    ""
+                } else {
+                    "Without a key, read-aloud quietly uses the system voice instead."
+                },
+                onSave = { scope.launch { repository.setElevenLabsKey(it) } },
+                onClear = { scope.launch { repository.clearElevenLabsKey() } },
             )
-        }
-        Box {
-            TextButton(onClick = { open = true }) {
-                Text(selected.ifBlank { "None selected" }, maxLines = 1)
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                if (models.isEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text("No models — test the connection first") },
-                        onClick = { open = false },
-                    )
-                }
-                models.forEach { model ->
-                    DropdownMenuItem(
-                        text = { Text(model) },
-                        onClick = { onSelect(model); open = false },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ThemeRow(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Theme", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        ThemeMode.entries.forEach { mode ->
-            val chosen = mode == selected
-            TextButton(onClick = { onSelect(mode) }) {
-                Text(
-                    text = mode.label,
-                    fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal,
-                    color = if (chosen) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            if (settings.hasElevenLabsKey) {
+                VoicePicker(container = container, settings = settings)
+                ElevenLabsModelPicker(
+                    selected = ElevenLabsModel.fromId(settings.elevenLabsModelId),
+                    onSelect = { scope.launch { repository.setElevenLabsModel(it) } },
                 )
             }
         }
     }
 }
 
-/**
- * Which of the account's voices reads an answer back.
- *
- * The list is fetched on demand rather than when the section appears: it is a network call against
- * somebody's paid account, and most openings of this page are on the way to something else. Until
- * it has been asked for, the row says "Load voices" and Cirrus uses whatever the account's default
- * is — which is a working state, not a broken one, and worth saying so.
- */
 @Composable
-private fun VoiceRow(container: AppContainer, settings: AppSettings) {
+private fun AppearanceBody(container: AppContainer, settings: AppSettings) {
     val scope = rememberCoroutineScope()
-    var voices by remember { mutableStateOf<List<ElevenLabsVoice>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var expanded by remember { mutableStateOf(false) }
+    val repository = container.settingsRepository
 
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text("Voice", style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = settings.elevenLabsVoiceName.ifBlank { "The account's default voice" },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Box {
-            TextButton(
-                enabled = settings.hasElevenLabsKey && !loading,
-                onClick = {
-                    if (voices.isNotEmpty()) {
-                        expanded = true
-                        return@TextButton
-                    }
-                    scope.launch {
-                        loading = true
-                        error = null
-                        runCatching { container.elevenLabsClient.voices() }
-                            .onSuccess {
-                                voices = it
-                                expanded = it.isNotEmpty()
-                                if (it.isEmpty()) error = "That account has no voices on it."
-                            }
-                            .onFailure { error = it.userMessage() }
-                        loading = false
-                    }
-                },
-            ) {
-                Text(if (voices.isEmpty()) "Load voices" else "Change")
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                voices.forEach { voice ->
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(voice.name)
-                                voice.description?.let {
-                                    Text(
-                                        text = it,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        },
-                        onClick = {
-                            scope.launch {
-                                container.settingsRepository.setElevenLabsVoice(voice.id, voice.name)
-                            }
-                            expanded = false
-                        },
-                    )
-                }
-            }
-        }
-        if (loading) {
-            Spacer(Modifier.width(8.dp))
-            CircularProgressIndicator(Modifier.height(16.dp).width(16.dp))
-        }
-    }
-    error?.let {
-        Text(
-            text = it,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
+    ThemeSelector(
+        selected = settings.themeMode,
+        onSelect = { scope.launch { repository.setThemeMode(it) } },
+    )
+    SwitchRow(
+        title = "Render markdown",
+        subtitle = "Turn off to read raw model output verbatim",
+        help = "Formats replies: headings, lists, tables, and syntax-highlighted code blocks. Off " +
+            "shows exactly the characters the model produced, asterisks and backticks included — " +
+            "useful when you are debugging a prompt's formatting.",
+        checked = settings.renderMarkdown,
+        onCheckedChange = { scope.launch { repository.setRenderMarkdown(it) } },
+    )
+}
+
+/** The two switches that are about watching Cirrus work rather than about what it does. */
+@Composable
+private fun DiagnosticsBody(container: AppContainer, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    val repository = container.settingsRepository
+
+    SwitchRow(
+        title = "Show generation stats",
+        subtitle = "Tokens per second, token counts and latency under each reply",
+        help = "Adds a line under each reply with output speed, prompt and response token counts, " +
+            "and time to the first token. The numbers come from the server's own timings, so they " +
+            "measure the host, not your connection.",
+        checked = settings.showStats,
+        onCheckedChange = { scope.launch { repository.setShowStats(it) } },
+    )
+    SwitchRow(
+        title = "Developer mode",
+        subtitle = "Capture and display the exact request JSON for every turn",
+        help = "Stores the exact JSON body sent for each turn and shows it under the reply — " +
+            "system prompt, context window, options and tool definitions included. Nothing extra " +
+            "is sent; it only records what already went out.",
+        checked = settings.developerMode,
+        onCheckedChange = { scope.launch { repository.setDeveloperMode(it) } },
+    )
 }
 
 /**
- * What this build is, where it keeps its things, and the one irreversible button.
+ * What is stored, where it is stored, and the one irreversible button.
  *
  * The folder is named rather than merely alluded to, and there is a button that opens it, because
  * this is the build with no Keystore and no Room database — "on this computer only" is a claim the
- * user should be able to go and check. It is also the answer to backing Cirrus up, which on
- * Android is the system's problem and here is nobody's until somebody says where to copy from.
+ * user should be able to go and check. It is also the answer to what backing Cirrus up means,
+ * which on Android is the system's problem and here is nobody's until somebody says which folder
+ * to copy.
  */
 @Composable
-private fun AboutSection(container: AppContainer) {
+private fun DataBody(container: AppContainer) {
     val scope = rememberCoroutineScope()
     var confirming by remember { mutableStateOf(false) }
 
-    Section(SettingsSection.ABOUT) {
-        Text(
-            text = "Cirrus $AppVersion for the desktop.",
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "Conversations, memories, agents and keys are files in ${container.dataDir.path}. " +
-                "Nothing is synced anywhere, and copying that folder is what backing Cirrus up means.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton(
-                label = "Open data folder",
-                onClick = { revealInFileManager(container.dataDir) },
-                style = PillStyle.Secondary,
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text = "Cirrus $AppVersion for the desktop.",
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = "Conversations, memories, agents and keys are files in ${container.dataDir.path}. " +
+            "Nothing is synced anywhere, and copying that folder is what backing Cirrus up means. " +
+            "There is no Keystore on the desktop, so the keys in it are not encrypted at rest.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(16.dp))
+    PillButton(
+        label = "Open data folder",
+        style = PillStyle.Secondary,
+        onClick = { revealInFileManager(container.dataDir) },
+    )
+
+    Spacer(Modifier.height(24.dp))
+    Hairline()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { confirming = true }
+            .padding(vertical = 14.dp),
+    ) {
+        Column {
+            Text(
+                text = "Delete all conversations",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.error,
             )
-            PillButton(
-                label = "Delete all conversations",
-                onClick = { confirming = true },
-                style = PillStyle.Secondary,
+            Text(
+                text = "Memories, agents and settings are left alone",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -918,6 +1172,488 @@ private fun AboutSection(container: AppContainer) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The rows the sections are built from
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Caption above a field, with the question mark that explains it. */
+@Composable
+private fun LabelWithHelp(label: String, help: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodyLarge)
+        HelpBadge(title = label, text = help)
+    }
+}
+
+/**
+ * A setting with its own explanation.
+ *
+ * [subtitle] says what the switch does in a handful of words; [help] is the paragraph behind the
+ * question mark, for the "…but what does that actually change?" question the subtitle cannot
+ * answer without turning the list into an essay. The long page this screen replaced had no help
+ * text at all, which is half of why it needed reading rather than scanning.
+ */
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    help: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    val contentAlpha = if (enabled) 1f else DISABLED_ALPHA
+
+    HelpTooltip(title = title, text = help) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) { onCheckedChange(!checked) }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                )
+            }
+            HelpBadge(title = title, text = help)
+            Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+        }
+    }
+}
+
+/** A row that leads somewhere else, rather than changing something in place. */
+@Composable
+private fun NavigationRow(
+    title: String,
+    subtitle: String,
+    help: String,
+    onClick: () -> Unit,
+) {
+    HelpTooltip(title = title, text = help) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HelpBadge(title = title, text = help)
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Says what attaching servers has actually bought you, which is a tool count, not a server count. */
+private fun mcpSubtitle(serverCount: Int, toolCount: Int): String = when {
+    serverCount == 0 -> "None attached"
+    toolCount == 0 -> "$serverCount attached · no tools available"
+    else -> {
+        val servers = if (serverCount == 1) "1 server" else "$serverCount servers"
+        val tools = if (toolCount == 1) "1 tool" else "$toolCount tools"
+        "$servers · $tools offered to the model"
+    }
+}
+
+/**
+ * A bounded number, as a slider rather than a text field.
+ *
+ * The field this replaces let you type 999 into a setting whose useful range stops at 20, and gave
+ * no sense of where in that range you were. A slider carries its own bounds, which for a setting
+ * nobody visits twice is most of the documentation.
+ */
+@Composable
+private fun StepperRow(
+    title: String,
+    subtitle: String,
+    help: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    format: (Float) -> String,
+    onChange: (Float) -> Unit,
+    enabled: Boolean = true,
+) {
+    val contentAlpha = if (enabled) 1f else DISABLED_ALPHA
+
+    HelpTooltip(title = title, text = help) {
+        Column(Modifier.padding(vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                    )
+                }
+                HelpBadge(title = title, text = help)
+                Text(
+                    text = format(value),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = contentAlpha),
+                )
+            }
+            Slider(
+                value = value,
+                onValueChange = onChange,
+                valueRange = range,
+                steps = steps,
+                enabled = enabled,
+            )
+        }
+    }
+}
+
+/**
+ * A secret: entered, saved, replaced, removed — and never shown back.
+ *
+ * The same shape as the phone's three key fields, because it is the same job three times over and
+ * the phone had learned things this build had not. The reveal toggle is the one that matters: a
+ * key is pasted far more often than typed, and a masked field gives you no way to see that you
+ * pasted the wrong one. What is revealed is only ever what you have just typed — the stored secret
+ * is never read back into the field, on either build.
+ *
+ * [trailing] is where the API key hangs its Test button, so that the one field with something to
+ * prove can prove it without a second row of controls.
+ */
+@Composable
+private fun SecretField(
+    label: String,
+    fieldLabel: String,
+    replaceLabel: String,
+    placeholder: String,
+    saveLabel: String,
+    help: String,
+    isSet: Boolean,
+    footer: String,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    var draft by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+
+    Column {
+        LabelWithHelp(label = label, help = help)
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text(if (isSet) replaceLabel else fieldLabel) },
+            placeholder = { Text(placeholder) },
+            singleLine = true,
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        imageVector = if (visible) {
+                            Icons.Outlined.VisibilityOff
+                        } else {
+                            Icons.Outlined.Visibility
+                        },
+                        contentDescription = if (visible) "Hide" else "Show",
+                    )
+                }
+            },
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PillButton(
+                label = saveLabel,
+                enabled = draft.isNotBlank(),
+                onClick = {
+                    onSave(draft)
+                    draft = ""
+                },
+            )
+            trailing()
+            if (isSet) {
+                PillButton(label = "Remove", style = PillStyle.Ghost, onClick = onClear)
+            }
+        }
+
+        if (footer.isNotBlank()) {
+            Text(
+                text = footer,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModelDropdownRow(
+    selected: String,
+    models: List<String>,
+    onSelect: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val help = "What a new conversation starts on. The list comes from your host's own " +
+        "catalogue, so it is empty until a connection has been tested."
+
+    HelpTooltip(title = "Default model", text = help) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Default model", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = "What a new conversation starts on",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HelpBadge(title = "Default model", text = help)
+            Box {
+                PillButton(
+                    label = selected.ifBlank { "None selected" },
+                    style = PillStyle.Secondary,
+                    onClick = { open = true },
+                )
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    if (models.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("No models — test the connection first") },
+                            onClick = { open = false },
+                        )
+                    }
+                    models.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model) },
+                            onClick = { onSelect(model); open = false },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeSelector(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+    Column(Modifier.padding(top = 8.dp)) {
+        LabelWithHelp(
+            label = "Theme",
+            help = "\"Follow system\" tracks this desktop's own light/dark setting. The other two " +
+                "pin Cirrus regardless of what the rest of the machine is doing. The traffic " +
+                "lights and the menu bar always follow the system, because they are the " +
+                "operating system's furniture rather than Cirrus's.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ThemeMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = selected == mode,
+                    onClick = { onSelect(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                    label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeechEngineSelector(selected: SpeechEngine, onSelect: (SpeechEngine) -> Unit) {
+    Column(Modifier.padding(top = 8.dp)) {
+        LabelWithHelp(
+            label = "Voice engine",
+            help = "The system voice drives whatever this desktop already has — say on macOS, " +
+                "spd-say or espeak on Linux, SAPI on Windows — and needs no account. ElevenLabs " +
+                "sounds markedly better and needs a key. Text is handed to the system engine on " +
+                "stdin rather than on a command line, because an answer read aloud is arbitrary " +
+                "model output and one containing a quote would otherwise become a command.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SpeechEngine.entries.forEachIndexed { index, engine ->
+                SegmentedButton(
+                    selected = selected == engine,
+                    onClick = { onSelect(engine) },
+                    shape = SegmentedButtonDefaults.itemShape(index, SpeechEngine.entries.size),
+                    label = { Text(engine.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+/**
+ * Which of the account's voices reads an answer back.
+ *
+ * The list is fetched on demand rather than when the section appears: it is a network call against
+ * somebody's paid account, and most openings of this page are on the way to something else. Until
+ * it has been asked for, the row says "Load voices" and Cirrus uses whatever the account's default
+ * is — which is a working state, not a broken one, and worth saying so.
+ */
+@Composable
+private fun VoicePicker(container: AppContainer, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    var voices by remember { mutableStateOf<List<ElevenLabsVoice>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.padding(top = 12.dp)) {
+        LabelWithHelp(
+            label = "Voice",
+            help = "Every voice on your ElevenLabs account, including ones you cloned or made " +
+                "yourself. Cirrus uses the default voice until you pick one.",
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ContainerShape)
+                .clickable {
+                    if (voices.isNotEmpty()) {
+                        expanded = true
+                    } else if (!loading) {
+                        scope.launch {
+                            loading = true
+                            error = null
+                            runCatching { container.elevenLabsClient.voices() }
+                                .onSuccess {
+                                    voices = it
+                                    expanded = it.isNotEmpty()
+                                    if (it.isEmpty()) error = "That account has no voices on it."
+                                }
+                                .onFailure { error = it.userMessage() }
+                            loading = false
+                        }
+                    }
+                }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = settings.elevenLabsVoiceName.ifBlank { "Default voice" },
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            if (loading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text(
+                    text = if (voices.isEmpty()) "Load voices" else "Change",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            voices.forEach { voice ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(voice.name)
+                            voice.description?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    onClick = {
+                        scope.launch {
+                            container.settingsRepository.setElevenLabsVoice(voice.id, voice.name)
+                        }
+                        expanded = false
+                    },
+                )
+            }
+        }
+        error?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/**
+ * How the audio is made.
+ *
+ * Three options with a sentence each, laid out as a segmented row rather than hidden behind a
+ * dropdown: the choice is a trade between latency and delivery, and a menu that shows one label at
+ * a time is exactly the control that makes a trade invisible.
+ */
+@Composable
+private fun ElevenLabsModelPicker(selected: ElevenLabsModel, onSelect: (ElevenLabsModel) -> Unit) {
+    Column(Modifier.padding(top = 12.dp)) {
+        LabelWithHelp(
+            label = "Synthesis model",
+            help = "How the audio is made. Flash starts talking soonest, which is what matters " +
+                "when you are waiting to hear an answer; the others sound better but keep you " +
+                "waiting longer before the first word.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ElevenLabsModel.entries.forEachIndexed { index, model ->
+                SegmentedButton(
+                    selected = model == selected,
+                    onClick = { onSelect(model) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ElevenLabsModel.entries.size),
+                    label = { Text(model.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
 /**
  * Shows a folder in whatever this desktop calls its file manager.
  *
@@ -933,3 +1669,5 @@ private fun revealInFileManager(directory: File) {
         }
     }
 }
+
+private const val DISABLED_ALPHA = 0.38f

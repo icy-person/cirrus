@@ -62,6 +62,15 @@ sealed interface Screen {
 
     data object Settings : Screen
 
+    /**
+     * One group of settings, opened from the hub.
+     *
+     * A screen per section rather than a scroll position, because that is what makes the back
+     * button mean "back to the list" — and because the hub is then a screen you can scan rather
+     * than a table of contents for the thing below it.
+     */
+    data class SettingsGroup(val section: SettingsSection) : Screen
+
     data object Memory : Screen
 
     data object Agents : Screen
@@ -236,10 +245,19 @@ private fun AppContent(
                 is Screen.Settings -> SettingsScreen(
                     container = container,
                     onClose = ::back,
+                    onOpenSection = { go(Screen.SettingsGroup(it)) },
                     onOpenMemory = { go(Screen.Memory) },
                     onOpenAgents = { go(Screen.Agents) },
-                    onOpenMcpServers = { go(Screen.McpServers) },
                     onRunSetup = { go(Screen.Setup) },
+                    topInset = TitleBarHeight,
+                    leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
+                )
+
+                is Screen.SettingsGroup -> SettingsSectionScreen(
+                    section = current.section,
+                    container = container,
+                    onBack = ::back,
+                    onOpenMcpServers = { go(Screen.McpServers) },
                     topInset = TitleBarHeight,
                     leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
                 )

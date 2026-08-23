@@ -87,7 +87,7 @@ enum class SettingSwitch(
     GITHUB(
         id = "github",
         title = "GitHub tools",
-        path = "Settings → GitHub → GitHub tools",
+        path = "Settings → GitHub and MCP → GitHub tools",
         summary = "Reading repositories, code, issues and pull requests.",
         reader = AppSettings::gitHubToolsEnabled,
         credential = Credential(
