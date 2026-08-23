@@ -90,7 +90,7 @@ import java.io.File
  * least important anyway.
  */
 private val AppVersion: String =
-    AppContainer::class.java.`package`?.implementationVersion ?: "1.8.0"
+    AppContainer::class.java.`package`?.implementationVersion ?: "1.9.0"
 
 /**
  * The settings hub.

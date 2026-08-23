@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [1.9.0] - 2026-08-23
+
+### Added
+
+- **The desktop app has an icon.** A packager given no `iconFile` does not fail — it quietly ships
+  the generic Java coffee cup, which is what Cirrus had been wearing in the Dock, the taskbar and
+  every alt-tab list. The mark is rendered from the same geometry as Android's launcher icon, in
+  the three containers the platforms each insist on. macOS needs it twice over: the Dock reads the
+  icon from the application bundle, which a `:desktop:run` has none of, so it is also handed over
+  directly through `Taskbar`.
+
+### Changed
+
+- **Desktop settings are nine groups and two destinations, not one long scroll.** The old page was
+  ordered by when each control was written, which put the context-window field below the GitHub
+  token. That a 1180pt window can render thirty unrelated controls at once was the argument for
+  leaving it alone, and it was the wrong one — a window wide enough to show everything is not a
+  window anybody can scan. The groups, their order and their names are the phone's, so nobody with
+  both builds learns where things live twice, and `describe_settings` can hand the model
+  "Settings → Tools → Memory" without knowing which machine it is answering on.
+- **The settings controls themselves now match the phone's**, which is where the desktop had
+  quietly invented its own:
+  - The **connection** section leads with the API key and follows with the host, and each has its
+    own commit. One "Save and test" button meant a mistyped host could not be corrected without
+    re-entering a key. Testing now reports which model answered rather than a bare "connected" —
+    a host with an empty catalogue says the same thing otherwise.
+  - **Every secret field can be revealed.** A key is pasted far more often than it is typed, and a
+    permanently masked field gives no way to see that the wrong thing was pasted. What is revealed
+    is only ever what has just been typed; the stored secret is never read back into the field.
+  - **Spotify's redirect URI gets a panel and a copy button** instead of a mention inside a
+    paragraph. It has to match on both ends character for character, it is invisible from Spotify's
+    side, and getting it wrong produces an error on Spotify's own page that never mentions Cirrus.
+    It is also longer here than on the phone — a loopback address with a port, not a tidy
+    `cirrus://` scheme — so it is the one string on that screen nobody should retype by eye.
+  - **The synthesis-model picker is a segmented row** with a sentence under it, not a dropdown. The
+    choice is a trade between latency and delivery, and a menu showing one label at a time is
+    exactly the control that hides a trade.
+
+
 ## [1.8.0] - 2026-08-20
 
 ### Added
@@ -505,7 +544,10 @@ do things.
   or bridges its tools into the registry.
 - LaTeX is mapped to Unicode, not typeset. There is no layout, so fractions render as `a/b`.
 
-[Unreleased]: https://github.com/klaibercore/cirrus/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/klaibercore/cirrus/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/klaibercore/cirrus/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/klaibercore/cirrus/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/klaibercore/cirrus/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/klaibercore/cirrus/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/klaibercore/cirrus/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/klaibercore/cirrus/compare/v1.4.0...v1.5.0

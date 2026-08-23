@@ -36,7 +36,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Cirrus"
-            packageVersion = "1.8.0"
+            packageVersion = "1.9.0"
             description = "A capable, local-first chat client for Ollama."
 
             // One mark, three containers. Each platform's packager only reads its own format, and
