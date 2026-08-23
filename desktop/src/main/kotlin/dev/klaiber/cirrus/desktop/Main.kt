@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyShortcut
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -16,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import dev.klaiber.cirrus.di.AppContainer
 import dev.klaiber.cirrus.ui.CirrusApp
 import dev.klaiber.cirrus.ui.window.LocalWindowTitle
+import dev.klaiber.cirrus.ui.window.applyDockIcon
 import dev.klaiber.cirrus.ui.window.applyNativeChrome
 import dev.klaiber.cirrus.ui.window.isMac
 import dev.klaiber.cirrus.ui.window.prepareNativeApplication
@@ -37,6 +39,9 @@ fun main() {
     // Before anything touches AWT: the toolkit reads the application name and appearance once, at
     // initialisation, and a window created first locks in the main class's name instead.
     prepareNativeApplication()
+    // After the properties above and before the first window: the Dock reads its icon from the
+    // bundle, which a development run does not have, so it has to be handed one directly.
+    applyDockIcon()
 
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val container = AppContainer(dataDir = dataDirectory(), scope = applicationScope)
@@ -52,6 +57,9 @@ fun main() {
             onCloseRequest = ::exitApplication,
             state = windowState,
             title = windowTitle.value,
+            // What Windows and the Linux shells put in a taskbar. macOS ignores it and is served
+            // by `applyDockIcon` above, and by `iconFile` once the app is packaged.
+            icon = painterResource("icon.png"),
         ) {
             LaunchedEffect(window) {
                 applyNativeChrome(window)

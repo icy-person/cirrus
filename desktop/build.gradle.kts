@@ -38,6 +38,17 @@ compose.desktop {
             packageName = "Cirrus"
             packageVersion = "1.8.0"
             description = "A capable, local-first chat client for Ollama."
+
+            // One mark, three containers. Each platform's packager only reads its own format, and
+            // a missing `iconFile` is not an error — it silently ships the generic Java coffee
+            // cup, which is how the app came to have no icon at all. The sources are rendered from
+            // the same geometry as Android's `ic_launcher_foreground.xml`.
+            macOS {
+                iconFile.set(project.file("icons/Cirrus.icns"))
+                bundleID = "dev.klaiber.cirrus"
+            }
+            windows { iconFile.set(project.file("icons/Cirrus.ico")) }
+            linux { iconFile.set(project.file("icons/Cirrus.png")) }
         }
     }
 }
