@@ -10,7 +10,11 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import dev.klaiber.cirrus.data.repository.SkillRepository
 import dev.klaiber.cirrus.domain.tools.DeviceToolSet
+import dev.klaiber.cirrus.domain.tools.ListSkillsTool
+import dev.klaiber.cirrus.domain.tools.SkillToolSet
+import dev.klaiber.cirrus.domain.tools.UseSkillTool
 import dev.klaiber.cirrus.domain.tools.SpotifyToolSet
 import dev.klaiber.cirrus.domain.tools.device.LocationTool
 import dev.klaiber.cirrus.domain.tools.device.MediaControlTool
@@ -72,6 +76,19 @@ object AppModule {
     @Provides
     @Singleton
     fun provideShellRunner(workspace: ShellWorkspace): ShellRunner = ShellRunner(workspace)
+
+    /**
+     * The skill chooser, assembled by hand because the set carries the repository as well as the
+     * two tools — it builds the standing brief from the same list `list_skills` returns, and one
+     * source for both is what keeps them from disagreeing.
+     */
+    @Provides
+    @Singleton
+    fun provideSkillToolSet(
+        repository: SkillRepository,
+        list: ListSkillsTool,
+        use: UseSkillTool,
+    ): SkillToolSet = SkillToolSet(repository = repository, list = list, use = use)
 
     /** Assembled by hand so that "which of these can act on the phone?" has one obvious answer. */
     @Provides

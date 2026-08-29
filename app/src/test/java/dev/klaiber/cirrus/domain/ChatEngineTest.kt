@@ -26,6 +26,8 @@ import dev.klaiber.cirrus.domain.tools.RecallTool
 import dev.klaiber.cirrus.domain.tools.RememberTool
 import dev.klaiber.cirrus.domain.tools.SendNotificationTool
 import dev.klaiber.cirrus.domain.tools.DescribeSettingsTool
+import dev.klaiber.cirrus.domain.tools.DownloadFileTool
+import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import dev.klaiber.cirrus.domain.tools.DeviceToolSet
 import dev.klaiber.cirrus.domain.tools.SpotifyToolSet
 import dev.klaiber.cirrus.domain.tools.ToolRegistry
@@ -49,6 +51,11 @@ import dev.klaiber.cirrus.domain.tools.github.SearchCodeTool
 import dev.klaiber.cirrus.domain.tools.github.WriteFileTool
 import dev.klaiber.cirrus.domain.tools.WebFetchTool
 import dev.klaiber.cirrus.domain.tools.WebSearchTool
+import dev.klaiber.cirrus.data.remote.skills.SkillsRegistryClient
+import dev.klaiber.cirrus.data.repository.SkillRepository
+import dev.klaiber.cirrus.domain.tools.ListSkillsTool
+import dev.klaiber.cirrus.domain.tools.SkillToolSet
+import dev.klaiber.cirrus.domain.tools.UseSkillTool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -113,9 +120,30 @@ class ChatEngineTest {
             SseMcpTransport(http, json),
             json,
         )
+        // Empty and never written to: the tool loop is what is under test, not what a skill
+        // would say once it was loaded.
+        val skillRepository = SkillRepository(
+            dataStore = dataStore,
+            registry = SkillsRegistryClient(OkHttpClient(), json),
+            json = json,
+            scope = scope,
+        )
+
         return ToolRegistry(
             webSearchTool = WebSearchTool(client, settingsRepository),
             webFetchTool = WebFetchTool(client),
+            // Nothing here downloads anything: the workspace is a throwaway directory and no test
+            // below names the tool. It is constructed rather than stubbed so the registry's own
+            // wiring — two switches on one group — is the thing under test.
+            downloadFileTool = DownloadFileTool(
+                OkHttpClient(),
+                ShellWorkspace(
+                    File(
+                        System.getProperty("java.io.tmpdir"),
+                        "cirrus-download-${System.nanoTime()}",
+                    ),
+                ),
+            ),
             gitHubTools = GitHubToolSet(
                 listRepos = ListReposTool(gitHubClient),
                 searchCode = SearchCodeTool(gitHubClient),
@@ -145,6 +173,11 @@ class ChatEngineTest {
                 RememberTool(memoryRepository),
                 RecallTool(memoryRepository),
                 ForgetTool(memoryRepository),
+            ),
+            skillTools = SkillToolSet(
+                repository = skillRepository,
+                list = ListSkillsTool(skillRepository),
+                use = UseSkillTool(skillRepository),
             ),
             notificationTool = SendNotificationTool(RecordingNotifier()),
             // The device and Spotify tools need a Context and an account, so none is offered here.

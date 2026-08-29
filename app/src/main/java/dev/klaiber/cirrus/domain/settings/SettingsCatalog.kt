@@ -51,8 +51,9 @@ enum class SettingSwitch(
         id = "shell",
         title = "Shell and everyday tools",
         path = "Settings → Tools → Shell and everyday tools",
-        summary = "The exact date and time, a calendar month, this phone's details, and safe " +
-            "shell commands in a private scratch folder.",
+        summary = "The exact date and time, a calendar month, this phone's details, safe " +
+            "shell commands in a private scratch folder, and downloading a file into it to " +
+            "work on.",
         reader = AppSettings::shellToolsEnabled,
     ),
     APPS(
@@ -75,6 +76,14 @@ enum class SettingSwitch(
                 "phone's own Settings → Apps → Cirrus → Permissions.",
             present = AppSettings::hasLocationPermission,
         ),
+    ),
+    SKILLS(
+        id = "skills",
+        title = "Use skills",
+        path = "Settings → Skills → Use skills",
+        summary = "Prepared instructions for particular kinds of job, chosen per request from the " +
+            "ones the user has installed from the public skills library.",
+        reader = AppSettings::skillsEnabled,
     ),
     WRITES(
         id = "writes",

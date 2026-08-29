@@ -54,3 +54,20 @@ annotation class ElevenLabsHttp
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class SpotifyHttp
+
+/**
+ * The client for hosts Cirrus has no account with.
+ *
+ * Attaches no credential at all, and that is the whole specification. Two things use it: the skills
+ * registry, which needs none, and `download_file`, whose URL is chosen by the model from something
+ * the user said. The second is why this is a qualifier rather than a shrug — every other client
+ * here injects a credential holder and sets `Authorization` from it in an interceptor, so reusing
+ * any one of them would send that service's key to an arbitrary host named in a chat message.
+ *
+ * Not the same client as [McpHttp], which also carries no credential of its own, because that one
+ * disables the call timeout for a long-lived SSE stream. A download that never finishes is a hung
+ * tool call in the middle of a turn, and it needs a deadline.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class PlainHttp

@@ -115,6 +115,79 @@ object CommandPolicy {
     )
 
     /**
+     * Programs that would mean building, packaging or serving something here.
+     *
+     * They are none of them installed, so the allow list already refuses every one. Naming them
+     * anyway is the whole point: "npm is not available, runnable here: base64 basename cat …" reads
+     * to a model as an inventory problem, and the next command is `yarn`, then `pnpm`, then a
+     * `printf` that writes a `package.json` nobody can ever build. The refusal below ends that line
+     * instead, because it answers the question the model is actually asking — *can I build this
+     * here?* — with the reason the answer is no.
+     *
+     * The reason matters more than the list. This is a phone: a couple of gigabytes of RAM shared
+     * with everything else running, no toolchain, no package manager, and — since API 29 — no way
+     * to install one, because Android refuses to execute a binary an app downloaded into its own
+     * data directory. A scaffolded project here is not slow, it is impossible, and the honest thing
+     * is to say so on the first attempt rather than the fifth.
+     *
+     * Grouped by what the program would have been *for*, so the sentence the model reads names the
+     * category rather than the binary. A model told "node is not on the list" looks for another
+     * runtime; a model told "there is no JavaScript runtime here, and nothing to install one with"
+     * writes the file's contents into its answer, which is what the user wanted.
+     */
+    val toolchainPrograms: Map<String, String> = buildMap {
+        val runtimes = "a language runtime or package manager"
+        listOf(
+            "node", "nodejs", "npm", "npx", "yarn", "pnpm", "bun", "deno",
+            "python", "python2", "python3", "pip", "pip3", "pipx", "uv",
+            "ruby", "gem", "bundle", "perl", "php", "lua", "r", "rscript",
+            "java", "javac", "kotlin", "kotlinc", "scala", "dotnet", "mono",
+        ).forEach { put(it, runtimes) }
+
+        val builders = "a compiler or build system"
+        listOf(
+            "make", "cmake", "ninja", "gradle", "gradlew", "mvn", "ant", "bazel",
+            "gcc", "g++", "cc", "clang", "clang++", "ld", "as", "rustc", "cargo",
+            "go", "gofmt", "swift", "swiftc", "tsc", "esbuild", "webpack", "rollup", "vite",
+        ).forEach { put(it, builders) }
+
+        val servers = "a web server"
+        listOf(
+            "serve", "http-server", "caddy", "nginx", "httpd", "apache2", "flask", "gunicorn",
+            "uvicorn", "next", "nuxt", "hugo", "jekyll", "webrick",
+        ).forEach { put(it, servers) }
+
+        val containers = "a container or virtual machine"
+        listOf("docker", "podman", "kubectl", "helm", "vagrant", "qemu").forEach {
+            put(it, containers)
+        }
+
+        // Not a build tool, but it arrives for the same reason and deserves the same answer: a
+        // model that has decided it is working on a project reaches for `git init` next.
+        put("git", "a version control system")
+        put("hg", "a version control system")
+        put("svn", "a version control system")
+    }
+
+    /**
+     * What the model is told when it reaches for one of those.
+     *
+     * One sentence on why it is not here, one on what this shell *is*, and one on what to do
+     * instead — because a refusal that does not name an alternative is a refusal the model will
+     * try to negotiate with. The alternative is nearly always "put it in your answer": a web page,
+     * a script or a document is text, the user can read text, and a file in a scratch directory
+     * they cannot browse to is worth less than the same text on screen.
+     */
+    fun toolchainRefusal(program: String, what: String): String =
+        "$program is not here, and neither is anything like it: running it would mean $what, and " +
+            "this phone has no toolchain, no package manager, and no way to install one — Android " +
+            "refuses to execute a binary an app downloaded. run_command is a scratch pad for small " +
+            "text jobs, not a development machine: it cannot build, bundle, compile, package or " +
+            "serve anything, and nothing could reach a server here in any case. If the user wants " +
+            "a web page, a script, a config file or a document, write its contents into your " +
+            "answer, where they can read it, copy it and use it on a computer that can run it."
+
+    /**
      * The only absolute paths that may be named.
      *
      * All five are world-readable statements of fact about the hardware, and all five are things
@@ -145,6 +218,9 @@ object CommandPolicy {
     private val redirectOperators = setOf(">", ">>", "<")
 
     private const val MAX_LENGTH = 500
+
+    /** Past this, a generated range is not something anybody is going to read. */
+    private const val MAX_SEQ = 100_000L
 
     fun check(command: String): CommandVerdict {
         val raw = command.trim()
@@ -216,6 +292,10 @@ object CommandPolicy {
                     "$program is blocked — ${blockedPrograms.getValue(program)}",
                 )
 
+                toolchainPrograms.containsKey(program) -> return CommandVerdict.Refused(
+                    toolchainRefusal(program, toolchainPrograms.getValue(program)),
+                )
+
                 program !in allowedPrograms -> return CommandVerdict.Refused(
                     "$program is not available. Runnable here: ${allowedPrograms.sorted().joinToString(" ")}",
                 )
@@ -276,6 +356,18 @@ object CommandPolicy {
 
         "rm" -> "rm needs something to remove, named explicitly"
             .takeIf { args.none { arg -> !arg.startsWith("-") } }
+
+        // A bare `seq 100000000` is not a mistake in the command, it is a mistake in the plan: the
+        // output cap means nothing past the first few thousand lines can ever be read, and the file
+        // it gets redirected into is the workspace budget spent in one go. Refusing names the
+        // number, because the model nearly always wanted a sample rather than the range.
+        "seq" -> args.mapNotNull { it.toLongOrNull() }.maxOrNull()
+            ?.takeIf { it > MAX_SEQ }
+            ?.let {
+                "seq would generate $it values, which is more than anything here can read or " +
+                    "hold — the output cap is a few thousand characters. Ask for at most " +
+                    "$MAX_SEQ, or pipe a smaller range."
+            }
 
         else -> null
     }

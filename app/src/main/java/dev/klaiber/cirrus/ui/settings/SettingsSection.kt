@@ -1,6 +1,7 @@
 package dev.klaiber.cirrus.ui.settings
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Insights
@@ -44,6 +45,11 @@ enum class SettingsSection(
         title = "Tools",
         summary = "The shell, apps, location, memory, limits",
         icon = Icons.Outlined.Bolt,
+    ),
+    SKILLS(
+        title = "Skills",
+        summary = "Prepared instructions for particular kinds of job",
+        icon = Icons.Outlined.AutoAwesome,
     ),
     INTEGRATIONS(
         title = "GitHub and MCP",

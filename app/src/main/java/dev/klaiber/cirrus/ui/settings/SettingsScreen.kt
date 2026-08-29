@@ -63,6 +63,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.klaiber.cirrus.data.remote.elevenlabs.ElevenLabsVoice
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
+import dev.klaiber.cirrus.domain.model.ReadAloudMode
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import androidx.compose.foundation.layout.ColumnScope
@@ -324,6 +325,7 @@ fun SettingsSectionScreen(
     section: SettingsSection,
     onBack: () -> Unit,
     onOpenMcpServers: () -> Unit,
+    onOpenSkills: () -> Unit,
     /** Asks Android for the location permission, then reports what it said. */
     onLocationToggle: (Boolean) -> Unit = {},
     onSpotifyConnect: () -> Unit = {},
@@ -486,6 +488,32 @@ fun SettingsSectionScreen(
             
                 }
 
+                SettingsSection.SKILLS -> {
+
+                SwitchRow(
+                    title = "Use skills",
+                    subtitle = "Offer the model the skills you have installed",
+                    help = "A skill is a page of instructions for one kind of job, published to " +
+                        "the public library at skills.sh and installed here. The model sees only " +
+                        "the names and one-line descriptions until it picks one, so an installed " +
+                        "skill costs almost nothing until the moment it is the right one. " +
+                        "Installing needs the network; using one does not.",
+                    checked = state.settings.skillsEnabled,
+                    onCheckedChange = viewModel::setSkillsEnabled,
+                )
+
+                NavigationRow(
+                    title = "Your skills",
+                    subtitle = skillsSubtitle(state.skillCount, state.activeSkillCount),
+                    help = "What is installed, with a switch each. Turning one off keeps it here " +
+                        "but takes it out of what the model is told about — which is the useful " +
+                        "state for a skill you want back next month. The same screen opens the " +
+                        "library, where there are thousands more.",
+                    onClick = onOpenSkills,
+                )
+
+                }
+
                 SettingsSection.MUSIC -> {
 
                 SpotifyPanel(
@@ -530,6 +558,10 @@ fun SettingsSectionScreen(
                     onCheckedChange = viewModel::setReadAloudEnabled,
                 )
                 if (state.settings.readAloudEnabled) {
+                    ReadAloudModeSelector(
+                        selected = state.settings.readAloudMode,
+                        onSelect = viewModel::setReadAloudMode,
+                    )
                     SpeechEngineSelector(
                         selected = state.settings.speechEngine,
                         onSelect = viewModel::setSpeechEngine,
@@ -775,6 +807,42 @@ private fun SectionHeader(text: String) {
  * discovers they can have a voice that does not sound like a satnav. Picking it reveals the key
  * field rather than nagging beforehand.
  */
+/**
+ * How much of an answer is spoken.
+ *
+ * Placed above the engine picker because it is the larger decision: which voice reads it matters
+ * only once you have settled what it is reading.
+ */
+@Composable
+private fun ReadAloudModeSelector(selected: ReadAloudMode, onSelect: (ReadAloudMode) -> Unit) {
+    Column(Modifier.padding(vertical = 8.dp)) {
+        LabelWithHelp(
+            label = "How much to read",
+            help = "Speech is linear: a written answer you would skim in twenty seconds is six " +
+                "minutes read out, and there is no way to skip the part you did not need. " +
+                "A spoken summary is a minute or so on what the answer concluded and why, " +
+                "written for the ear by the model you are already using. Short answers are " +
+                "read in full either way, and the written answer never changes.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ReadAloudMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = mode == selected,
+                    onClick = { onSelect(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ReadAloudMode.entries.size),
+                    label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
 @Composable
 private fun SpeechEngineSelector(selected: SpeechEngine, onSelect: (SpeechEngine) -> Unit) {
     Column(Modifier.padding(vertical = 8.dp)) {
@@ -1389,6 +1457,21 @@ private fun NavigationRow(
 }
 
 /** Says what attaching servers has actually bought you, which is a tool count, not a server count. */
+/**
+ * "Three installed, two in use".
+ *
+ * Both numbers, because they answer different questions and the second is the one that matters:
+ * only the switched-on skills are named to the model, so a library of ten with two enabled behaves
+ * exactly like a library of two.
+ */
+private fun skillsSubtitle(installed: Int, active: Int): String = when {
+    installed == 0 -> "None installed — browse the library"
+    active == installed && installed == 1 -> "1 skill, offered to the model"
+    active == installed -> "$installed skills, all offered to the model"
+    active == 0 -> "$installed installed · none switched on"
+    else -> "$installed installed · $active offered to the model"
+}
+
 private fun mcpSubtitle(serverCount: Int, toolCount: Int): String = when {
     serverCount == 0 -> "None attached"
     toolCount == 0 -> "$serverCount attached · no tools available"

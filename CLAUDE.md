@@ -2,8 +2,9 @@
 
 Kotlin + Compose client for [Ollama](https://ollama.com). Talks to either a local Ollama instance
 or the hosted cloud API over HTTP, streams responses token by token, renders markdown with
-syntax-highlighted code blocks, and calls tools — web search, a GitHub integration, and any MCP
-server the user attaches.
+syntax-highlighted code blocks, and calls tools — web search, a GitHub integration, a sandboxed
+shell, and any MCP server the user attaches. Skills, installed from the public library at skills.sh,
+give the model a prepared method for a particular job when the request turns out to be one.
 
 Two modules ship it. `:app` is the Android build and is what the rest of this file describes.
 `:desktop` is the Compose Multiplatform build for macOS, Linux and Windows — the same domain
@@ -45,6 +46,7 @@ app/src/main/java/dev/klaiber/cirrus/
 │   │   └── components/     # MessageItem, ToolActivity, Composer, ModelPickerSheet, ...
 │   ├── conversations/       # ConversationDrawer + ConversationsViewModel
 │   ├── memory/             # MemoryScreen + MemoryViewModel (browse, edit, pin, retire)
+│   ├── skills/             # SkillsScreen (installed) + SkillsExploreScreen + SkillsViewModel
 │   ├── agents/             # AgentsScreen, AgentEditorSheet (AgentDraft), history/template sheets
 │   ├── onboarding/         # OnboardingScreen + OnboardingViewModel — the first-run wizard
 │   ├── settings/           # SettingsScreen + SettingsViewModel
@@ -57,6 +59,7 @@ app/src/main/java/dev/klaiber/cirrus/
 ├── domain/
 │   ├── ChatEngine.kt       # the turn protocol: build request → stream → service tool calls
 │   ├── SpeechController.kt # read-aloud: chunking, ElevenLabs or the device engine, playback
+│   ├── SpokenSummary.kt    # what gets spoken: a summary of a long answer, not the whole of it
 │   ├── agents/             # AgentRunner (headless turn) + AgentScheduler/AgentWorker
 │   ├── memory/             # MemoryRetriever (pure ranking), MemoryConsolidator, nightly worker
 │   ├── notify/             # Notifier interface + AndroidNotifier
@@ -68,6 +71,8 @@ app/src/main/java/dev/klaiber/cirrus/
 │   ├── settings/           # SettingsCatalog — every capability switch, and where to find it
 │   ├── spotify/            # SpotifySession — token refresh, sign-in, and where they persist
 │   └── tools/              # CirrusTool interface, ToolRegistry, web tools, McpTool/McpToolSet
+│       ├── SkillTools.kt   # list_skills / use_skill — the chooser, and the brief behind it
+│       ├── DownloadFileTool.kt # a URL's raw bytes, into the shell workspace
 │       ├── github/         # 11 GitHub tools + shared schema/argument plumbing
 │       ├── spotify/        # 5 tools: search, now playing, library, playback, playlist edit
 │       ├── device/         # LocationTool, MediaControlTool
@@ -76,10 +81,11 @@ app/src/main/java/dev/klaiber/cirrus/
 │   ├── remote/             # OllamaClient (OkHttp + NDJSON), DTOs, ApiCredentials, exceptions
 │   │   ├── github/         # GitHubClient (REST v3), DTOs, GitHubCredentials
 │   │   ├── spotify/        # SpotifyClient + SpotifyAuth (PKCE), DTOs, SpotifyCredentials
-│   │   └── elevenlabs/     # ElevenLabsClient (text-to-speech), ElevenLabsCredentials
+│   │   ├── elevenlabs/     # ElevenLabsClient (text-to-speech), ElevenLabsCredentials
+│   │   └── skills/         # SkillsRegistryClient (skills.sh search + download)
 │   ├── mcp/                # McpClient + transports, McpCatalog (known servers)
 │   ├── local/              # Room database, DAOs, entities, mappers
-│   ├── repository/         # Conversation/Settings/Model + McpServerRepository
+│   ├── repository/         # Conversation/Settings/Model + Mcp/Skill repositories
 │   └── prefs/              # SecretCipher (Keystore-backed envelope encryption)
 └── di/                     # AppModule, NetworkModule, DatabaseModule, Qualifiers
 ```
@@ -131,6 +137,26 @@ app/src/main/java/dev/klaiber/cirrus/
   `date` reports UTC unless `TZ` is set. Output is capped at both ends rather than the first 8,000
   characters — most text jobs here end in their answer (`wc` after a pipeline, the last hunk of a
   diff), so a head-only cap throws away the line the command was run for.
+- **Nothing gets built here.** `CommandPolicy.toolchainPrograms` names every compiler, package
+  manager, runtime, web server and container tool by name — none of which is installed, so the allow
+  list already refused them. Naming them is the point: "npm is not available, runnable here: base64
+  basename cat …" reads to a model as an *inventory* problem, and the next command is `yarn`, then
+  `pnpm`, then a hand-written `package.json` nobody can ever build. `toolchainRefusal` answers the
+  question actually being asked — can I build this here? — with the reason the answer is no, and
+  with what to do instead: put the file's contents in the answer. On Android that reason is
+  physical (no toolchain, and since API 29 no way to install one); on the desktop it is structural
+  (the workspace cannot reach a real project, background jobs are refused, so a build or a server
+  started in a chat turn could neither finish nor be reached). `git` is in the map on Android and
+  deliberately absent on the desktop, where the read-only subcommand rule is the authority on it.
+  The same rule is stated once more in `ToolRegistry.standingBrief`, because every refusal costs a
+  round trip to discover and a plan abandoned six commands in has already spent the user's turn.
+- **`ShellWorkspace.budgetProblem`** — a per-topic byte and file cap, checked *before* a command
+  rather than enforced after one. `trimTo` does enforce a total, but it deletes oldest-first across
+  the whole workspace, so the price of one runaway command is somebody else's job, paid silently. A
+  refusal in front names the topic, the size and `clean_workspace`, and the next call is a cleanup
+  rather than another megabyte. Two caps because they catch different mistakes: bytes catch the
+  model writing a website into a scratch directory, the file count catches `part-001.txt` through
+  `part-400.txt`, which stays under any byte cap while making the topic listing useless.
 - **Topics** — the workspace is divided by job, and every command runs inside one. A single flat
   scratch directory across a long session becomes `out.txt`, `out2.txt`, `tmp.txt`, and the model
   starts reading the wrong one; a topic also *isolates*, since `..` is refused and one job therefore
@@ -212,6 +238,34 @@ app/src/main/java/dev/klaiber/cirrus/
   split at sentence ends, and the hosted path synthesises one chunk ahead of the one playing so
   there is no gap at the seam. ElevenLabs needs a key and is opt-in; without one it falls back to
   Android's own engine rather than failing.
+- **`SpokenSummary`** — decides *what* is spoken, which is usually not the whole answer. Speech is
+  linear and runs at about two and a half words a second, so an answer written to be skimmed —
+  headings to jump between, a table to glance at, a code block to ignore — is six minutes of audio
+  with no way to skip the part you did not need. Past `VERBATIM_CHARS` the answer is summarised into
+  two or three spoken paragraphs by the user's own model; below it, it is read as written, because
+  summarising four sentences produces three, more slowly, having lost something. Every failure path
+  — no default model, a timed-out request, an empty reply — falls through to `condense`, which is
+  pure, local and instant, so the button always makes sound. `AppSettings.readAloudMode` turns the
+  whole thing off for the one case it cannot serve: somebody listening to their own text to check it.
+- **`SkillToolSet` / `SkillRepository` / `SkillsRegistryClient`** — skills, and the chooser for them.
+  A skill is a page of instructions for one kind of job, fetched from the public registry at
+  skills.sh (the index behind `npx skills`). The design is the two-step: the *names and
+  descriptions* of enabled skills go into the standing brief, which is cheap and is exactly what
+  choosing needs, and the body arrives only when the model calls `use_skill`. Putting every
+  installed skill's instructions in the system prompt would cost thousands of tokens on every turn
+  of every conversation, nearly all of it about jobs nobody is doing. `UseSkillTool.CIRRUS_CAVEAT`
+  is the other half: most of the registry is written for coding agents with a terminal and a
+  checkout, so the instructions arrive with a sentence saying to take the method and ignore
+  everything that assumes a development machine — attached to the instructions, because a rule in
+  the system prompt is read before the skill and forgotten by the time it contradicts one.
+- **`DownloadFileTool`** — fetches a URL's actual bytes into the shell workspace. `web_fetch`
+  flattens a page to prose, which is right for "what does this article say" and wrong for
+  everything else: the markup is gone, so is the CSV's comma structure, so is the JSON. This saves
+  the file into the topic the model is already working in, so `grep`, `wc` and `head` are right
+  there and it can be looked at three times without being fetched three times. Capped at the
+  *topic's* budget rather than a number of its own, and read in bounded chunks rather than through
+  `body.bytes()` — on a phone, from a URL a model chose, holding a whole file in memory before
+  anything can decide it is too big is the one failure mode worth extra code to avoid.
 
 ### Data flow for a chat turn
 
@@ -310,6 +364,23 @@ Three consequences worth keeping straight:
   and never touches one that has been detached.
 - **The nightly memory pass skips them.** `ConversationDao.updatedSince` excludes agent threads, or
   a scheduled prompt gets harvested as a durable fact about the user every single night.
+
+### Skills
+
+A skill is text, and text written by strangers, which is why the gates around it are worth stating.
+`skillsEnabled` (default **on**) is not behind the conversation's tools switch, for the same reason
+memory is not: the instructions came down when the skill was installed and reading one costs nothing
+that leaves the device. Only *installing* touches the network, and that happens on a screen the user
+is looking at, which is a different kind of decision from a tool call.
+
+What a skill cannot do is make anything possible. Every gate in `ToolRegistry` still applies, so a
+skill that tells the model to open a GitHub issue gets the same refusal any other route would. What
+it can do is send the model somewhere pointless, which is what the caveat on `use_skill` is for.
+
+Reference files are recorded and not downloaded. A package may ship a dozen of them; Cirrus can
+neither execute nor fetch-on-demand any of it, so the *names* are stored and listed back when the
+skill is loaded — a model whose instructions say "see references/testing.md" otherwise goes looking
+for a file that does not exist here and spends a turn concluding something is broken.
 
 ### Memory, agents, the shell, and the tools switch
 
@@ -468,6 +539,9 @@ Cirrus is open.** WorkManager persists its queue, so a sleeping phone fires a mi
 desktop app that was not running missed it, and the next occurrence is booked instead. Firing a
 fortnight of stale briefings at launch would be worse than skipping them.
 
+**Read-aloud summarises, on both builds.** `SpokenSummary` is shared code and behaves identically
+here; the desktop only differs in how the audio comes out.
+
 **Read-aloud is PCM, not MP3.** The JVM decodes no MP3 at all, so rather than ship a decoder the
 ElevenLabs client asks for raw PCM and `javax.sound.sampled` plays it directly against a format that
 is known and fixed. `SystemVoice` replaces `TextToSpeech` and drives whatever the desktop has —
@@ -480,6 +554,15 @@ writing itself into the system's handler table, so the redirect is `http://127.0
 served by a JDK `HttpServer` up only for the length of one sign-in. The port is fixed because
 Spotify matches the redirect character for character. The PKCE verifier is held in memory rather
 than persisted — the listener that consumes it is in this same process.
+
+**Skills live in a JSON file, and nothing about them is a secret.** `SkillRepository` is a
+[JsonStore] like every other store here, and unlike the MCP servers it has no cipher — a skill is
+public text from a public repository, so there is nothing in it to protect. The registry client
+rides on `plainHttp`, a client that carries no credential at all: `download_file` fetches a URL the
+*model* chose, and every other client in `AppContainer` attaches somebody's key in an interceptor,
+so reusing one would hand that key to a host named in a chat message. It is not `mcpHttp` either,
+which disables the call timeout for a long-lived SSE stream — a download that never finishes is a
+hung tool call in the middle of a turn.
 
 **What is deliberately absent.** Dictation (`SpeechRecognizer` has no counterpart worth shipping, and
 a bundled model would dwarf the app), location, and `media_control`. All three are gone from the
@@ -497,7 +580,7 @@ is the build with no Keystore and no database, so "on this computer only" is a c
 be able to go and check — and it is also the answer to what backing Cirrus up means here, which on
 Android is the system's problem and here is nobody's until somebody says which folder to copy.
 
-The test suite came across with the code: 416 tests across 36 classes, run with `:desktop:test`.
+The test suite came across with the code: 457 tests across 40 classes, run with `:desktop:test`.
 
 ## Gotchas
 
@@ -606,6 +689,16 @@ The test suite came across with the code: 416 tests across 36 classes, run with 
 - The macOS title bar made transparent by `applyNativeChrome` is **still there and still takes the
   drag**. Anything interactive placed in the top `TitleBarHeight` of the window will look clickable
   and not be. Screens inset past it rather than drawing into it.
+- The skills registry has **no endpoint that lists everything**, and `/api/search` returns a 400 for
+  a query under two characters. That is why the Explore page opens on curated topic chips rather
+  than on an empty search box: each chip is an ordinary search through the same call, so there is no
+  second data path and no hand-maintained list to go stale. `SkillsRegistryClient.search` returns an
+  empty list rather than raising below the floor, because that is what the field looks like while
+  somebody is still typing.
+- A **literal byte-order mark in a Kotlin source is a lint error** (`ByteOrderMark`), for the same
+  reason a raw NUL is: it makes the file binary to the tools that read it. `parseSkillDocument` has
+  to strip one — Windows editors put it in front of a `SKILL.md`'s opening `---`, which would stop
+  the frontmatter being recognised at all — so it is written `'\uFEFF'` via a named constant.
 - A stream that ends without a chunk carrying `done` is **truncated, not finished**
   (`OllamaException.Truncated`). Treating it as a normal completion is what makes half an answer
   look like the model's final word. `ChatEngine` re-issues such a round only while it has emitted

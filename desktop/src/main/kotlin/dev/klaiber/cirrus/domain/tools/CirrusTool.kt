@@ -182,9 +182,11 @@ class WebFetchTool(
 class ToolRegistry(
     webSearchTool: WebSearchTool,
     webFetchTool: WebFetchTool,
+    private val downloadFileTool: DownloadFileTool,
     private val gitHubTools: GitHubToolSet,
     private val memoryTools: MemoryToolSet,
     private val notificationTool: SendNotificationTool,
+    private val skillTools: SkillToolSet,
     private val deviceTools: DeviceToolSet,
     private val spotifyTools: SpotifyToolSet,
     private val settingsTool: DescribeSettingsTool,
@@ -227,6 +229,10 @@ class ToolRegistry(
         // no way to correct it is worse than not remembering at all.
         Group(memoryTools.all, SettingSwitch.MEMORY, external = false),
         Group(listOf(notificationTool), SettingSwitch.NOTIFICATIONS, external = false),
+        // Local, like memory: the instructions came down when the skill was installed, and reading
+        // one costs nothing that leaves the device. Only installing touches the network, and that
+        // happens on a screen rather than in a turn.
+        Group(skillTools.all, SettingSwitch.SKILLS, external = false),
         // The shell, the clock and the calendar are on the same footing as memory: local, instant,
         // and nothing leaves the computer. A model that cannot ask what today's date is answers
         // every scheduling question from the year it was trained in, which is wrong in the way
@@ -238,6 +244,11 @@ class ToolRegistry(
         // behind a switch would be a joke at the user's expense.
         Group(listOf(settingsTool), gate = null, external = false),
         Group(webTools, gate = null, external = true),
+        // Its own group because it answers to two switches rather than one. It reaches the network,
+        // so the conversation's tools switch governs it; but what it produces is a file in the shell
+        // workspace, so a download with the shell switched off would put bytes somewhere nothing
+        // could read them. Both on, or neither is any use.
+        Group(listOf(downloadFileTool), gate = SettingSwitch.SHELL, external = true),
         Group(
             tools = gitHubTools.all,
             gate = SettingSwitch.GITHUB,
@@ -347,26 +358,58 @@ class ToolRegistry(
     /**
      * The standing rules that belong in the system prompt rather than in a tool description.
      *
-     * A tool's description is read when the model is deciding whether to call *that tool*. Two of
-     * the shell's rules have to survive longer than one decision — stay non-destructive, and clean
-     * up before you finish — because the second one is about the end of a session, which is exactly
-     * the moment nobody is looking at a tool description. Both are one sentence each: this is paid
-     * for on every turn, and a paragraph of etiquette would cost more context than the tool saves.
+     * A tool's description is read when the model is deciding whether to call *that tool*. Three of
+     * the shell's rules have to survive longer than one decision, and each fails in a different
+     * place. "Stay non-destructive" has to hold while the model is deep in a job it has stopped
+     * re-reading descriptions for. "Clean up before you finish" is about the end of a session,
+     * which is exactly the moment nobody is looking at a tool description. And "keep the work
+     * small" fails *before* the first call: a model that has already decided to build a website
+     * reaches for `npm`, and by the time it is reading run_command's description it is reading it
+     * to find out which package manager is on the list, not whether the plan was ever possible.
+     *
+     * That third rule is the expensive one to leave out. The refusals are all in place — the
+     * toolchain is named in [CommandPolicy], the workspace has a budget — but every one of them
+     * costs a round trip to discover, and a plan abandoned six commands in has already spent the
+     * user's turn. Said here, it is spent once and up front.
      *
      * Null when nothing needs saying, so an install with the shell switched off sends nothing.
      */
-    fun standingBrief(): String? {
+    fun standingBrief(): String? = listOfNotNull(shellBrief(), skillsBrief())
+        .joinToString("\n\n")
+        .takeIf { it.isNotBlank() }
+
+    /**
+     * The skills half, or null when the switch is off or nothing is installed.
+     *
+     * The gate is checked here as well as in [groups], and it has to be: a brief that lists skills
+     * whose tools are refused would have the model announcing a method it cannot then read.
+     */
+    private fun skillsBrief(): String? = skillTools.brief()
+        ?.takeIf { SettingSwitch.SKILLS.isOn(settingsRepository.current.value) }
+
+    /**
+     * The shell's own half of it, or null when the shell is off.
+     *
+     * The emptiness check is not belt-and-braces: it is what stops the brief describing a shell to
+     * a build that has none.
+     */
+    private fun shellBrief(): String? {
         val settings = settingsRepository.current.value
-        // The emptiness check is not belt-and-braces: it is what stops the brief describing a shell
-        // to a build that has none.
         if (!settings.shellToolsEnabled || deviceTools.shell.isEmpty()) return null
         return "You can run shell commands on this computer with run_command. It works inside a " +
             "private scratch workspace and can reach nothing outside it. Pass text to work on in " +
             "its \"input\" argument rather than quoting it into the command, and name a \"topic\" " +
-            "per job so its files stay together. Two rules hold for the whole conversation: be " +
-            "non-destructive — read before you write, and never remove a file you did not create " +
-            "— and clean up after yourself by calling clean_workspace before you finish, whenever " +
-            "you have written anything. Use get_datetime rather than assuming today's date."
+            "per job so its files stay together. Three rules hold for the whole conversation. Be " +
+            "non-destructive: read before you write, and never remove a file you did not create. " +
+            "Clean up after yourself by calling clean_workspace before you finish, whenever you " +
+            "have written anything. And keep the work small — this is a scratch pad, not a " +
+            "development machine. Compilers, package managers and servers are refused by name, " +
+            "the workspace cannot reach a real project, background jobs are refused so nothing " +
+            "you start would outlive the command, and a topic holds only a few megabytes. Never " +
+            "plan to scaffold a project, build or serve a site, or generate a large file here; " +
+            "when someone asks for a web page, a script or a document, its contents belong in " +
+            "your answer, where they can read them and run them in their own terminal. Use " +
+            "get_datetime rather than assuming today's date."
     }
 
 }

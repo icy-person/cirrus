@@ -104,6 +104,80 @@ object CommandPolicy {
     )
 
     /**
+     * Programs that would mean building, packaging or serving something here.
+     *
+     * They are none of them installed, so the allow list already refuses every one. Naming them
+     * anyway is the whole point: "npm is not available, runnable here: base64 basename cat …" reads
+     * to a model as an inventory problem, and the next command is `yarn`, then `pnpm`, then a
+     * `printf` that writes a `package.json` nobody can ever build. The refusal below ends that line
+     * instead, because it answers the question the model is actually asking — *can I build this
+     * here?* — with the reason the answer is no.
+     *
+     * The reason is not that the machine cannot do it — this one plainly can, and that is exactly
+     * the problem. A chat turn that starts a build has no way to finish one: the workspace is a
+     * scratch directory that gets swept, `..` and absolute paths are refused so nothing can reach a
+     * real project, background jobs are refused so a dev server would be killed the moment the
+     * command returned, and nothing outside Cirrus could reach it anyway. The user has a terminal
+     * for this, and it is a better one than a tool call.
+     *
+     * Grouped by what the program would have been *for*, so the sentence the model reads names the
+     * category rather than the binary. A model told "node is not on the list" looks for another
+     * runtime; a model told "there is no JavaScript runtime here, and nothing to install one with"
+     * writes the file's contents into its answer, which is what the user wanted.
+     */
+    val toolchainPrograms: Map<String, String> = buildMap {
+        val runtimes = "a language runtime or package manager"
+        listOf(
+            "node", "nodejs", "npm", "npx", "yarn", "pnpm", "bun", "deno",
+            "python", "python2", "python3", "pip", "pip3", "pipx", "uv",
+            "ruby", "gem", "bundle", "perl", "php", "lua", "r", "rscript",
+            "java", "javac", "kotlin", "kotlinc", "scala", "dotnet", "mono",
+        ).forEach { put(it, runtimes) }
+
+        val builders = "a compiler or build system"
+        listOf(
+            "make", "cmake", "ninja", "gradle", "gradlew", "mvn", "ant", "bazel",
+            "gcc", "g++", "cc", "clang", "clang++", "ld", "as", "rustc", "cargo",
+            "go", "gofmt", "swift", "swiftc", "tsc", "esbuild", "webpack", "rollup", "vite",
+        ).forEach { put(it, builders) }
+
+        val servers = "a web server"
+        listOf(
+            "serve", "http-server", "caddy", "nginx", "httpd", "apache2", "flask", "gunicorn",
+            "uvicorn", "next", "nuxt", "hugo", "jekyll", "webrick",
+        ).forEach { put(it, servers) }
+
+        val containers = "a container or virtual machine"
+        listOf("docker", "podman", "kubectl", "helm", "vagrant", "qemu").forEach {
+            put(it, containers)
+        }
+
+        // `git` is deliberately absent: it is on the read-only list above, and
+        // [argumentProblem] already refuses every subcommand that changes a repository. A read-only
+        // `git log` in the workspace is a reasonable thing to want; `git init` is refused there.
+        put("hg", "a version control system")
+        put("svn", "a version control system")
+    }
+
+    /**
+     * What the model is told when it reaches for one of those.
+     *
+     * One sentence on why it is not here, one on what this shell *is*, and one on what to do
+     * instead — because a refusal that does not name an alternative is a refusal the model will
+     * try to negotiate with. The alternative is nearly always "put it in your answer": a web page,
+     * a script or a document is text, the user can read text, and a file in a scratch directory
+     * they cannot browse to is worth less than the same text on screen.
+     */
+    fun toolchainRefusal(program: String, what: String): String =
+        "$program is refused: running it would mean $what, and a chat turn is the wrong place " +
+            "for one. run_command is a scratch pad for small text jobs — the workspace is a " +
+            "scratch directory that gets swept, it cannot reach a real project, and background " +
+            "jobs are refused, so a build or a server started here could neither finish nor be " +
+            "reached. If the user wants a web page, a script, a config file or a document, write " +
+            "its contents into your answer, where they can read it and run it in their own " +
+            "terminal, which is a better one than this."
+
+    /**
      * The only absolute paths that may be named.
      *
      * All five are world-readable statements of fact about the hardware, and all five are things
@@ -134,6 +208,9 @@ object CommandPolicy {
     private val redirectOperators = setOf(">", ">>", "<")
 
     private const val MAX_LENGTH = 500
+
+    /** Past this, a generated range is not something anybody is going to read. */
+    private const val MAX_SEQ = 100_000L
 
     fun check(command: String): CommandVerdict {
         val raw = command.trim()
@@ -205,6 +282,10 @@ object CommandPolicy {
                     "$program is blocked — ${blockedPrograms.getValue(program)}",
                 )
 
+                toolchainPrograms.containsKey(program) -> return CommandVerdict.Refused(
+                    toolchainRefusal(program, toolchainPrograms.getValue(program)),
+                )
+
                 program !in allowedPrograms -> return CommandVerdict.Refused(
                     "$program is not available. Runnable here: ${allowedPrograms.sorted().joinToString(" ")}",
                 )
@@ -265,6 +346,18 @@ object CommandPolicy {
 
         "rm" -> "rm needs something to remove, named explicitly"
             .takeIf { args.none { arg -> !arg.startsWith("-") } }
+
+        // A bare `seq 100000000` is not a mistake in the command, it is a mistake in the plan: the
+        // output cap means nothing past the first few thousand lines can ever be read, and the file
+        // it gets redirected into is the workspace budget spent in one go. Refusing names the
+        // number, because the model nearly always wanted a sample rather than the range.
+        "seq" -> args.mapNotNull { it.toLongOrNull() }.maxOrNull()
+            ?.takeIf { it > MAX_SEQ }
+            ?.let {
+                "seq would generate $it values, which is more than anything here can read or " +
+                    "hold — the output cap is a few thousand characters. Ask for at most " +
+                    "$MAX_SEQ, or pipe a smaller range."
+            }
 
         // git is on the read-only list, but only its read-only face is. A subcommand that changes
         // a repository or touches the network is refused by name, because the workspace is the

@@ -52,8 +52,9 @@ enum class SettingSwitch(
         id = "shell",
         title = "Shell and everyday tools",
         path = "Settings → Tools → Shell and everyday tools",
-        summary = "The exact date and time, a calendar month, this computer's details, and safe " +
-            "shell commands in a private scratch folder.",
+        summary = "The exact date and time, a calendar month, this computer's details, safe " +
+            "shell commands in a private scratch folder, and downloading a file into it to " +
+            "work on.",
         reader = AppSettings::shellToolsEnabled,
     ),
     APPS(
@@ -62,6 +63,14 @@ enum class SettingSwitch(
         path = "Settings → Tools → Apps",
         summary = "Listing applications on this computer and opening one.",
         reader = AppSettings::appControlEnabled,
+    ),
+    SKILLS(
+        id = "skills",
+        title = "Use skills",
+        path = "Settings → Skills → Use skills",
+        summary = "Prepared instructions for particular kinds of job, chosen per request from the " +
+            "ones the user has installed from the public skills library.",
+        reader = AppSettings::skillsEnabled,
     ),
     WRITES(
         id = "writes",

@@ -91,7 +91,7 @@ class CommandPolicyTest {
     @Test
     fun `refuses anything simply not on the list`() {
         assertTrue("not available" in refused("nmap 10.0.0.1"))
-        assertTrue("not available" in refused("python3 script.py"))
+        assertTrue("not available" in refused("ffmpeg -i clip.mp4"))
     }
 
     // ---- Leaving the workspace ---------------------------------------------------------------
@@ -192,6 +192,75 @@ class CommandPolicyTest {
     fun `nothing that writes is on the read-only list`() {
         val writes = setOf("rm", "mv", "cp", "tee", "mkdir", "truncate", "rmdir", "touch")
         assertTrue(CommandPolicy.readOnlyPrograms.none { it in writes })
+    }
+
+    // ---- Nothing gets built here -------------------------------------------------------------
+
+    /**
+     * The refusal a model reads when it has decided to build something.
+     *
+     * The old answer was "npm is not available. Runnable here: base64 basename cat …", which reads
+     * as an inventory problem and gets answered with `yarn`, then `pnpm`, then a hand-written
+     * `package.json` that nothing will ever build. What is being asserted here is not that npm is
+     * refused — the allow list did that already — but that the refusal answers the question the
+     * model was actually asking, which is whether the plan is possible at all.
+     */
+    @Test
+    fun `a toolchain program is refused with the reason the plan cannot work`() {
+        val reason = refused("npm install")
+
+        assertTrue("it should not read as a missing entry on a list", "not on the list" !in reason)
+        assertTrue("it has to say what would happen instead", "your answer" in reason)
+        assertTrue(reason.length > 120)
+    }
+
+    @Test
+    fun `every shape of local build is refused, not just the popular one`() {
+        listOf(
+            "node server.js",
+            "python3 -m http.server",
+            "pip install flask",
+            "make all",
+            "gradle build",
+            "cargo run",
+            "go build",
+            "docker run nginx",
+            "tsc --watch",
+            "vite build",
+            "serve dist",
+        ).forEach { refused(it) }
+    }
+
+    @Test
+    fun `no toolchain program is also allowed or double-listed`() {
+        assertTrue(
+            "a program cannot be both runnable and refused",
+            CommandPolicy.allowedPrograms.none { CommandPolicy.toolchainPrograms.containsKey(it) },
+        )
+        assertTrue(
+            "one refusal per program, or the message depends on check order",
+            CommandPolicy.blockedPrograms.keys.none { CommandPolicy.toolchainPrograms.containsKey(it) },
+        )
+    }
+
+    /**
+     * A range nobody could read is a mistake in the plan rather than in the command.
+     *
+     * Left to run it would spend the whole timeout, produce far more than the output cap can
+     * return, and — redirected to a file — the topic's entire budget. Refusing costs one round trip
+     * and names the number the model should have asked for.
+     */
+    @Test
+    fun `an unreadable range is refused, an ordinary one is not`() {
+        allowed("seq 1 100")
+        allowed("seq 5000")
+        val reason = refused("seq 1 100000000")
+        assertTrue("the refusal should name a workable size", "100000" in reason)
+    }
+    @Test
+    fun `git is refused on the phone, where there is none`() {
+        val reason = refused("git init")
+        assertTrue("version control" in reason)
     }
 
     @Test

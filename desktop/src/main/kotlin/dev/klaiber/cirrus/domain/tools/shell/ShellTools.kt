@@ -78,6 +78,16 @@ class RunCommandTool(
             "answer, and always before you finish a session in which you wrote files. Topics " +
             "nobody has touched for a while are swept automatically, and the reply tells you when " +
             "that has happened, so never assume a file from an earlier topic is still there.\n\n" +
+            "IT IS A SCRATCH PAD, NOT A DEVELOPMENT MACHINE. There is no compiler, no package " +
+            "manager, no runtime and no server here, and none can be installed — npm, node, " +
+            "python, make, gradle, docker and everything like them are refused by name. Do not " +
+            "scaffold a project, build a site, compile anything or start a server: it will not " +
+            "work, and the turns spent finding that out are the user's. A topic holds " +
+            "${ShellWorkspace.MAX_TOPIC_BYTES / 1024}KB and " +
+            "${ShellWorkspace.MAX_TOPIC_FILES} files before the next command in it is refused. " +
+            "When the user asks for a web page, a script, a config file or a document, the answer " +
+            "is its contents, written into your reply where they can read and copy it — not a " +
+            "file in a scratch directory they cannot browse to.\n\n" +
             "DO NOT use this to ask the date, the time or what day something falls on: " +
             "get_datetime and show_calendar answer those exactly and without a process. Output " +
             "is capped at ${ShellRunner.MAX_OUTPUT_CHARS} characters — the first and last part " +
@@ -126,6 +136,21 @@ class RunCommandTool(
                 // say so, which would leave files quietly gone with nothing in the transcript to
                 // explain it. A command that never ran is also no reason to tidy up after one.
                 val swept = workspace.sweep()
+
+                // After the sweep, because the sweep may just have made the room. A budget that
+                // has run out is reported as a refusal rather than an error: the command was
+                // well-formed and would have run, and what the model needs to hear is which topic
+                // is full and which tool empties it, not that something went wrong.
+                val overBudget = workspace.budgetProblem(topic)
+                if (overBudget != null) {
+                    return@shellTool buildJsonObject {
+                        put("refused", true)
+                        put("command", command)
+                        put("topic", topic)
+                        put("reason", overBudget)
+                        putSweptTopics(swept)
+                    }.toString()
+                }
 
                 val timeout = arguments.int("timeout_seconds")
                     ?.let { it * 1_000L }
@@ -263,6 +288,20 @@ private fun JsonObjectBuilder.putTopicFiles(workspace: ShellWorkspace, topic: St
     val entries = workspace.topicEntries(topic).filter { !it.isDirectory }
     put("file_count", entries.size)
     if (entries.isEmpty()) return
+
+    // Reported every time, not only when it is a problem. A number that appears for the first time
+    // in a refusal is a surprise; a number the model has watched climb for three commands is a
+    // budget, and it starts writing smaller files before anything has to refuse it.
+    val bytes = entries.sumOf { it.sizeBytes }
+    put("topic_bytes", bytes)
+    if (bytes > ShellWorkspace.MAX_TOPIC_BYTES / 2) {
+        put(
+            "topic_nearly_full",
+            "This topic is over half of its ${ShellWorkspace.MAX_TOPIC_BYTES / 1024}KB limit. " +
+                "Past that, the next command here is refused. Finish the job and call " +
+                "clean_workspace, or work in a different topic.",
+        )
+    }
 
     putJsonArray("files") {
         entries.take(MAX_LISTED_FILES).forEach { entry ->

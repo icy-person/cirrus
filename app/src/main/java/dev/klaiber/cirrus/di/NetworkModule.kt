@@ -202,4 +202,47 @@ object NetworkModule {
             .callTimeout(0, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
+
+    /**
+     * A client for hosts Cirrus has no account with: the skills registry, and downloaded files.
+     *
+     * Carries no credential, which is the entire point of it existing separately. `download_file`
+     * fetches a URL the *model* chose, and every other client on this module attaches somebody's
+     * key in an interceptor — so any of them would have handed that key to a host named in a chat
+     * message. There is nothing to redact in the log because there is nothing to send.
+     *
+     * Bounded on every axis, unlike the MCP client which also carries no credential: a download has
+     * no long-lived stream to wait on, and one that never finishes is a hung tool call in the
+     * middle of a turn.
+     */
+    @Provides
+    @Singleton
+    @PlainHttp
+    fun providePlainOkHttpClient(): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("User-Agent", "Cirrus/${BuildConfig.VERSION_NAME} (Android)")
+                        .build(),
+                )
+            }
+            .apply {
+                if (BuildConfig.DEBUG) {
+                    addInterceptor(
+                        HttpLoggingInterceptor().apply {
+                            level = HttpLoggingInterceptor.Level.BASIC
+                        },
+                    )
+                }
+            }
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(120, TimeUnit.SECONDS)
+            // Redirects are the norm for a file URL — a CDN, a shortener, an http→https bounce —
+            // and the final URL is reported back so the model knows where the bytes came from.
+            .followRedirects(true)
+            .retryOnConnectionFailure(true)
+            .build()
 }

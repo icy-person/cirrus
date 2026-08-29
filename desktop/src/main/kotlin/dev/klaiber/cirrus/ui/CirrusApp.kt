@@ -32,6 +32,9 @@ import dev.klaiber.cirrus.ui.conversations.ConversationsModel
 import dev.klaiber.cirrus.ui.mcp.McpModel
 import dev.klaiber.cirrus.ui.mcp.McpServersScreen
 import dev.klaiber.cirrus.ui.memory.MemoryModel
+import dev.klaiber.cirrus.ui.skills.SkillsExploreScreen
+import dev.klaiber.cirrus.ui.skills.SkillsModel
+import dev.klaiber.cirrus.ui.skills.SkillsScreen
 import dev.klaiber.cirrus.ui.memory.MemoryScreen
 import dev.klaiber.cirrus.ui.onboarding.OnboardingModel
 import dev.klaiber.cirrus.ui.onboarding.OnboardingScreen
@@ -76,6 +79,15 @@ sealed interface Screen {
     data object Agents : Screen
 
     data object McpServers : Screen
+
+    /**
+     * The two skills screens, and they are two rather than a tabbed one on purpose: Explore is a
+     * different job from tending what you have, it is the only one that touches the network, and
+     * Back from it should land on the library rather than leave for Settings.
+     */
+    data object Skills : Screen
+
+    data object SkillsExplore : Screen
 }
 
 /**
@@ -183,6 +195,17 @@ private fun AppContent(
             ),
         )
 
+        // Hoisted out of the `when` because two destinations share it: Explore installs, the
+        // library lists, and a model per screen would have the search results thrown away every
+        // time somebody went back to look at what they had just installed.
+        val skillsModel = remember {
+            SkillsModel(
+                repository = container.skillRepository,
+                settingsRepository = container.settingsRepository,
+                scope = scope,
+            )
+        }
+
         /** Whichever screen the back stack has arrived at, given the room left beside the list. */
         @Composable
         fun Destination() {
@@ -258,6 +281,7 @@ private fun AppContent(
                     container = container,
                     onBack = ::back,
                     onOpenMcpServers = { go(Screen.McpServers) },
+                    onOpenSkills = { go(Screen.Skills) },
                     topInset = TitleBarHeight,
                     leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
                 )
@@ -299,6 +323,21 @@ private fun AppContent(
                         leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
                     )
                 }
+
+                is Screen.Skills -> SkillsScreen(
+                    onBack = ::back,
+                    onExplore = { go(Screen.SkillsExplore) },
+                    model = skillsModel,
+                    topInset = TitleBarHeight,
+                    leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
+                )
+
+                is Screen.SkillsExplore -> SkillsExploreScreen(
+                    onBack = ::back,
+                    model = skillsModel,
+                    topInset = TitleBarHeight,
+                    leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
+                )
 
                 is Screen.McpServers -> {
                     val mcpModel = remember {

@@ -20,11 +20,15 @@ import java.io.File
  * It lives under the app's data directory on purpose. Work nobody asked to keep belongs in a
  * scratch space, and keeping it out of the user's documents is the point.
  *
- * Cleaning up is not left to good intentions, and that is deliberate at three levels: [clear] runs
+ * Cleaning up is not left to good intentions, and that is deliberate at four levels. [clear] runs
  * when the process starts, so a session never inherits the last one's mess; [sweep] runs before
- * every command and retires topics nothing has touched for a while; and [trimTo] caps the total so
- * a runaway `seq` cannot fill the disk. The model is *also* told to tidy up, but a rule the model
- * has to remember at the end of a session is the one rule it will not remember.
+ * every command and retires topics nothing has touched for a while; [trimTo] caps the total so a
+ * runaway `seq` cannot fill the disk. Those three delete quietly. [budgetProblem] is the one that
+ * speaks — past a per-topic size it refuses the *next* command, with the reason and the remedy —
+ * and it is the only one of the four the model can learn anything from, which is why it is the one
+ * that stops a job going wrong rather than tidying up after it has. The model is *also* told to
+ * tidy up, but a rule the model has to remember at the end of a session is the one rule it will
+ * not remember.
  */
 class ShellWorkspace(private val root: File) {
 
@@ -129,6 +133,48 @@ class ShellWorkspace(private val root: File) {
     }
 
     /**
+     * Why this topic may not be written to any further, or null while it may.
+     *
+     * Checked *before* a command rather than enforced after one, because after is too late to be
+     * useful: [trimTo] does run and does delete, but it deletes oldest-first across the whole
+     * workspace, which means the price of one runaway command is somebody else's job. A refusal in
+     * front is the version the model can act on — it names the topic, the size, and the tool that
+     * fixes it, and the very next call is a `clean_workspace` rather than another megabyte.
+     *
+     * Two caps rather than one, because they catch different mistakes. Bytes catch the model that
+     * has decided to write a website into a scratch directory. The file count catches the one
+     * writing `part-001.txt` through `part-400.txt`, which stays well under any byte cap while
+     * making the topic listing — and the model's own picture of what it has — useless.
+     *
+     * This is a phone, and the numbers say so. The point is not that a computer could not hold more;
+     * it is that a chat turn producing more than this has stopped doing the thing it was asked to
+     * do, and the sooner it is told, the fewer turns it spends finding out.
+     */
+    fun budgetProblem(
+        topic: String?,
+        maxBytes: Long = MAX_TOPIC_BYTES,
+        maxFiles: Int = MAX_TOPIC_FILES,
+    ): String? {
+        val name = topicName(topic)
+        val files = File(root, name).walkTopDown().filter { it.isFile }.toList()
+        val bytes = files.sumOf { it.length() }
+
+        return when {
+            bytes > maxBytes -> "the \"$name\" topic already holds ${bytes / 1024}KB, over its " +
+                "${maxBytes / 1024}KB limit. The workspace is a scratch pad for small text jobs, " +
+                "not somewhere to assemble a large file. Call clean_workspace with this topic — " +
+                "or a different topic for unrelated work — and put anything worth keeping in " +
+                "your answer, where the user can actually read it."
+
+            files.size > maxFiles -> "the \"$name\" topic already holds ${files.size} files, over " +
+                "its limit of $maxFiles. A job that needs more than that has stopped being one " +
+                "job: call clean_workspace with this topic, then work in fewer, larger steps."
+
+            else -> null
+        }
+    }
+
+    /**
      * Deletes oldest-first until the workspace fits in [maxBytes].
      *
      * Oldest rather than largest: the one big file a command has just written is usually the point
@@ -172,6 +218,19 @@ class ShellWorkspace(private val root: File) {
     companion object {
         /** Generous for text, small enough that a mistake is not a storage incident. */
         const val MAX_BYTES: Long = 16L * 1024 * 1024
+
+        /**
+         * What one job may hold before the next command is refused.
+         *
+         * Well under [MAX_BYTES], and that gap is the design: the workspace cap is a backstop that
+         * deletes, and this one is a refusal that explains. Eight megabytes is a shelf of novels'
+         * worth of text — anything asking for more here is building something, and a build
+         * belongs in the user's own terminal.
+         */
+        const val MAX_TOPIC_BYTES: Long = 8L * 1024 * 1024
+
+        /** Past this many files, a topic has stopped being one job. */
+        const val MAX_TOPIC_FILES = 80
 
         /** Where a command lands when it did not say which job it belongs to. */
         const val DEFAULT_TOPIC = "scratch"

@@ -13,10 +13,12 @@ import dev.klaiber.cirrus.data.repository.MemoryRepository
 import dev.klaiber.cirrus.data.repository.McpServerRepository
 import dev.klaiber.cirrus.data.repository.ModelRepository
 import dev.klaiber.cirrus.data.repository.SettingsRepository
+import dev.klaiber.cirrus.data.repository.SkillRepository
 import dev.klaiber.cirrus.domain.model.AppSettings
 import dev.klaiber.cirrus.domain.model.GenerationParams
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.ModelInfo
+import dev.klaiber.cirrus.domain.model.ReadAloudMode
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import dev.klaiber.cirrus.domain.spotify.SpotifySession
@@ -55,6 +57,9 @@ data class SettingsUiState(
     val mcpToolCount: Int = 0,
     val memoryCount: Int = 0,
     val agentCount: Int = 0,
+    val skillCount: Int = 0,
+    /** Installed *and* switched on, which is what the model is actually told about. */
+    val activeSkillCount: Int = 0,
 )
 
 @HiltViewModel
@@ -66,6 +71,7 @@ class SettingsViewModel @Inject constructor(
     mcpServerRepository: McpServerRepository,
     memoryRepository: MemoryRepository,
     agentRepository: AgentRepository,
+    skillRepository: SkillRepository,
     private val client: OllamaClient,
     private val elevenLabs: ElevenLabsClient,
 ) : ViewModel() {
@@ -85,8 +91,16 @@ class SettingsViewModel @Inject constructor(
         mcpServerRepository.bindings,
         memoryRepository.activeCount,
         agentRepository.agents,
-    ) { servers, bindings, memories, agents ->
-        Counts(servers.size, bindings.size, memories, agents.size)
+        skillRepository.skills,
+    ) { servers, bindings, memories, agents, skills ->
+        Counts(
+            mcpServers = servers.size,
+            mcpTools = bindings.size,
+            memories = memories,
+            agents = agents.size,
+            skills = skills.size,
+            activeSkills = skills.count { it.enabled },
+        )
     }
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -103,6 +117,8 @@ class SettingsViewModel @Inject constructor(
             mcpToolCount = counts.mcpTools,
             memoryCount = counts.memories,
             agentCount = counts.agents,
+            skillCount = counts.skills,
+            activeSkillCount = counts.activeSkills,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -111,6 +127,8 @@ class SettingsViewModel @Inject constructor(
         val mcpTools: Int,
         val memories: Int,
         val agents: Int,
+        val skills: Int,
+        val activeSkills: Int,
     )
 
     init {
@@ -299,8 +317,16 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setDefaultParams(params) }
     }
 
+    fun setSkillsEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setSkillsEnabled(enabled) }
+    }
+
     fun setReadAloudEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setReadAloudEnabled(enabled) }
+    }
+
+    fun setReadAloudMode(mode: ReadAloudMode) {
+        viewModelScope.launch { settingsRepository.setReadAloudMode(mode) }
     }
 
     fun setSpeechEngine(engine: SpeechEngine) {

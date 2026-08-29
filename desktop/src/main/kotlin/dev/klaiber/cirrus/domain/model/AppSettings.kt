@@ -75,6 +75,14 @@ data class AppSettings(
     val spotifyPremium: Boolean = false,
     /** Offers the read-aloud button on each answer. */
     val readAloudEnabled: Boolean = true,
+    /**
+     * Whether read-aloud speaks a summary of a long answer or every word of it.
+     *
+     * Summary by default. Speech is linear and slow, so an answer written to be skimmed —
+     * headings, a table, a code block to skip — becomes six minutes of audio with nothing to
+     * skip past. Short answers are read verbatim either way; there is nothing to summarise.
+     */
+    val readAloudMode: ReadAloudMode = ReadAloudMode.SUMMARY,
     /** Who does the talking when an answer is read aloud. */
     val speechEngine: SpeechEngine = SpeechEngine.DEVICE,
     val hasElevenLabsKey: Boolean = false,
@@ -82,6 +90,19 @@ data class AppSettings(
     val elevenLabsVoiceName: String = "",
     val elevenLabsModelId: String = ElevenLabsModel.Default.id,
     /** Offers the remember/recall/forget tools, and sends pinned memories with every turn. */
+    /**
+     * Offers the skills library: the chooser tools, and the list of installed skills in the brief.
+     *
+     * On by default, and not behind the conversation's tools switch, because using a skill is
+     * local — the instructions were downloaded when it was installed and nothing leaves the device
+     * to read one. Installing is the part that touches the network, and that happens on a screen
+     * the user is looking at, which is a different kind of decision from a tool call.
+     *
+     * The switch earns its place anyway: skills are text written by strangers that a model reads
+     * as instruction, and somebody who wants none of that in their conversations should be able to
+     * say so once rather than uninstalling them one at a time.
+     */
+    val skillsEnabled: Boolean = true,
     val memoryEnabled: Boolean = true,
     /** Lets a model put something on the desktop notification tray. */
     val notificationToolEnabled: Boolean = true,

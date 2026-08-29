@@ -16,6 +16,7 @@ import dev.klaiber.cirrus.di.ApplicationScope
 import dev.klaiber.cirrus.domain.model.AppSettings
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.GenerationParams
+import dev.klaiber.cirrus.domain.model.ReadAloudMode
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import kotlinx.coroutines.CoroutineScope
@@ -164,7 +165,13 @@ class SettingsRepository @Inject constructor(
         it[Keys.ON_DEVICE_RECOGNITION] = enabled
     }
 
+    suspend fun setSkillsEnabled(enabled: Boolean) = edit { it[Keys.SKILLS_ENABLED] = enabled }
+
     suspend fun setReadAloudEnabled(enabled: Boolean) = edit { it[Keys.READ_ALOUD] = enabled }
+
+    suspend fun setReadAloudMode(mode: ReadAloudMode) = edit {
+        it[Keys.READ_ALOUD_MODE] = mode.name
+    }
 
     suspend fun setSpeechEngine(engine: SpeechEngine) = edit { it[Keys.SPEECH_ENGINE] = engine.name }
 
@@ -331,6 +338,9 @@ class SettingsRepository @Inject constructor(
         voiceInputEnabled = this[Keys.VOICE_INPUT] ?: true,
         preferOnDeviceRecognition = this[Keys.ON_DEVICE_RECOGNITION] ?: true,
         readAloudEnabled = this[Keys.READ_ALOUD] ?: true,
+        readAloudMode = this[Keys.READ_ALOUD_MODE]
+            ?.let { name -> runCatching { ReadAloudMode.valueOf(name) }.getOrNull() }
+            ?: ReadAloudMode.SUMMARY,
         speechEngine = this[Keys.SPEECH_ENGINE]
             ?.let { name -> runCatching { SpeechEngine.valueOf(name) }.getOrNull() }
             ?: SpeechEngine.DEVICE,
@@ -347,6 +357,7 @@ class SettingsRepository @Inject constructor(
         hasSpotifyAccount = this[Keys.SPOTIFY_REFRESH] != null,
         spotifyAccountName = this[Keys.SPOTIFY_ACCOUNT].orEmpty(),
         spotifyPremium = this[Keys.SPOTIFY_PREMIUM] ?: false,
+        skillsEnabled = this[Keys.SKILLS_ENABLED] ?: true,
         memoryEnabled = this[Keys.MEMORY_ENABLED] ?: true,
         notificationToolEnabled = this[Keys.NOTIFICATION_TOOL] ?: true,
         memoryConsolidationEnabled = this[Keys.CONSOLIDATION_ENABLED] ?: true,
@@ -391,6 +402,7 @@ class SettingsRepository @Inject constructor(
         val VOICE_INPUT = booleanPreferencesKey("voice_input")
         val ON_DEVICE_RECOGNITION = booleanPreferencesKey("on_device_recognition")
         val READ_ALOUD = booleanPreferencesKey("read_aloud")
+        val READ_ALOUD_MODE = stringPreferencesKey("read_aloud_mode")
         val SPEECH_ENGINE = stringPreferencesKey("speech_engine")
         val ELEVENLABS_KEY = stringPreferencesKey("elevenlabs_key_encrypted")
         val ELEVENLABS_VOICE = stringPreferencesKey("elevenlabs_voice")
@@ -410,6 +422,7 @@ class SettingsRepository @Inject constructor(
         val SPOTIFY_VERIFIER = stringPreferencesKey("spotify_pkce_verifier")
         val SPOTIFY_STATE = stringPreferencesKey("spotify_pkce_state")
         val APP_CONTROL = booleanPreferencesKey("app_control")
+        val SKILLS_ENABLED = booleanPreferencesKey("skills_enabled")
         val MEMORY_ENABLED = booleanPreferencesKey("memory_enabled")
         val NOTIFICATION_TOOL = booleanPreferencesKey("notification_tool")
         val CONSOLIDATION_ENABLED = booleanPreferencesKey("consolidation_enabled")

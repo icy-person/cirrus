@@ -81,9 +81,13 @@ know what a context window is, and gets out of your way.
   because it asks `/api/show` rather than guessing from the name.
 - **Every setting explains itself.** Long-press any control, or tap the `?`. No more wondering
   whether `min_p` and `top_k` should both be on. (They shouldn't.)
-- **Tools that matter.** Web search and page fetch, a full GitHub integration, Spotify, a
-  sandboxed shell, the clock and calendar, your location, and any MCP server you attach — each one
-  behind a switch, and everything that writes behind one more.
+- **Tools that matter.** Web search, page fetch and file download, a full GitHub integration,
+  Spotify, a sandboxed shell, the clock and calendar, your location, and any MCP server you attach —
+  each one behind a switch, and everything that writes behind one more.
+- **Skills, from the public library.** Install a prepared method for a job — writing a changelog,
+  running a research pass, reviewing a diff — from [skills.sh](https://skills.sh), and the model
+  reaches for it when the request turns out to be one of those. It reads the instructions only when
+  it picks one, so a shelf full of them costs a line each until the moment one is right.
 - **Your secrets stay on the device.** On Android, encrypted with a key that never leaves the
   Keystore. See [Privacy](#privacy) for what that means on the desktop, where there is no Keystore.
 - **One codebase, two platforms.** The turn protocol, the tool registry and its gates, the shell
@@ -103,8 +107,11 @@ know what a context window is, and gets out of your way.
 | 🔧 **Tool calling** | Bounded multi-round tool loops. Web search, page fetch and the GitHub tools. Spend the round budget and the model is asked once more without tools, so a turn ends on an answer rather than on a call nobody ran. A turn's calls collapse into one line in the transcript — how many steps, which tools, how long — because provenance should not out-weigh the answer it belongs to. |
 | 🐙 **GitHub integration** | Read code in public *and* private repos, search, browse trees, read issues and PR diffs. Opening issues, commenting, posting reviews and committing files are behind a separate, default-off switch. |
 | 🔌 **MCP servers** | Attach any Model Context Protocol server and its tools join the model's set. Both HTTP transports (streamable and SSE), auto-detected, each server's token sent only to it. A short catalogue of known servers — GitHub, Spotify, Sentry, Linear — makes attaching one a tap rather than a URL to go and find. |
+| 🧩 **Skills** | Install a page of instructions for one kind of job from the public library at [skills.sh](https://skills.sh) — the registry behind `npx skills` — and browse it from an Explore page that opens on subjects rather than an empty search box. The model is told only what each installed skill is *for*; it loads the instructions when it picks one, so a library costs a line per skill until one is actually the right one. Most of the registry is written for coding agents with a terminal, so the instructions arrive with a note to take the method and drop everything that assumes a development machine. |
+| 📥 **Download a file, as it is** | `web_fetch` flattens a page to prose, which is right for reading it and wrong for everything else. `download_file` saves the actual bytes — HTML, CSV, JSON, a log — into the shell's scratch folder, so the model can then `grep`, `head` and `wc` over the real thing rather than a summary of it. |
+| 🔊 **Read aloud, abridged** | An answer built to be skimmed is six minutes of audio read out in full, with no way to skip the part you did not need. Long answers are condensed by your own model into a minute or so — what it concluded, the reasoning that matters, and where the rest is — while short ones are read word for word. Turn it off and get every word. ElevenLabs if you want a better voice; the device's own if you do not. |
 | 🎵 **Spotify** | Search, your playlists and saved music, what is playing, playback control, and playlist edits. Signs in with OAuth/PKCE using a client ID you create, so no secret ships in the app. Playback control needs Premium — when Spotify refuses, Cirrus falls back to the phone's own media buttons, which work on any account and with any player. |
-| 🖥️ **A shell, safely** | Run commands on the phone for the small mechanical jobs. What may run is decided *before* anything does, from an allow list you can read in one sitting: no unlisted program, no absolute paths, no `..`, no `$(…)`, nothing that runs another program on the command's behalf. The working directory is a scratch folder in Cirrus's own cache, and it is the entire reachable world. Text to work on is piped to the command rather than quoted into it, files are grouped by the job they belong to, and idle jobs are cleared up without being asked. |
+| 🖥️ **A shell, safely** | Run commands on the phone for the small mechanical jobs. What may run is decided *before* anything does, from an allow list you can read in one sitting: no unlisted program, no absolute paths, no `..`, no `$(…)`, nothing that runs another program on the command's behalf. The working directory is a scratch folder in Cirrus's own cache, and it is the entire reachable world. Text to work on is piped to the command rather than quoted into it, files are grouped by the job they belong to, and idle jobs are cleared up without being asked. It is also honest about what it is not: compilers, package managers, runtimes and web servers are refused by name with the reason, so a model does not spend your turn discovering that a phone cannot build a website. |
 | 🕰️ **The clock, the calendar, this machine** | A model has no clock, so left alone it answers "how long until Friday?" from the year it was trained in. It can now ask: the exact time in your zone, a month laid out, and what this device actually is — down to which shell programs this particular machine ships with. |
 | 📍 **Where you are** *(Android)* | For the weather, what is nearby, travel time. Coarse accuracy only, by design rather than as a fallback, and off until you turn it on. Never in the background, and never from a scheduled agent. |
 | 🔐 **One switch for write actions** | Anything that changes something outside Cirrus and cannot be undone from inside it — a GitHub issue, a commit, a Spotify playlist, an MCP tool that has not declared itself read-only — is behind a single default-off switch. Reversible things, like pausing music, are not writes and stay available. |
@@ -239,7 +246,7 @@ graph TD
         Controller[TurnController<br/>owns turns in flight]
         Engine[ChatEngine<br/>the turn protocol]
         Registry[ToolRegistry]
-        Tools[WebSearch · WebFetch<br/>GitHub × 12 · Spotify · MCP<br/>shell · clock · memory]
+        Tools[WebSearch · WebFetch · Download<br/>GitHub × 12 · Spotify · MCP<br/>skills · shell · clock · memory]
     end
 
     subgraph data["data"]

@@ -10,6 +10,7 @@ import dev.klaiber.cirrus.data.remote.elevenlabs.ElevenLabsClient
 import dev.klaiber.cirrus.data.remote.elevenlabs.ElevenLabsCredentials
 import dev.klaiber.cirrus.data.remote.github.GitHubClient
 import dev.klaiber.cirrus.data.remote.github.GitHubCredentials
+import dev.klaiber.cirrus.data.remote.skills.SkillsRegistryClient
 import dev.klaiber.cirrus.data.remote.spotify.SpotifyAuth
 import dev.klaiber.cirrus.data.remote.spotify.SpotifyClient
 import dev.klaiber.cirrus.data.remote.spotify.SpotifyCredentials
@@ -21,9 +22,11 @@ import dev.klaiber.cirrus.data.repository.McpServerRepository
 import dev.klaiber.cirrus.data.repository.MemoryRepository
 import dev.klaiber.cirrus.data.repository.ModelRepository
 import dev.klaiber.cirrus.data.repository.SettingsRepository
+import dev.klaiber.cirrus.data.repository.SkillRepository
 import dev.klaiber.cirrus.domain.ChatEngine
 import dev.klaiber.cirrus.domain.ConversationTitler
 import dev.klaiber.cirrus.domain.SpeechController
+import dev.klaiber.cirrus.domain.SpokenSummary
 import dev.klaiber.cirrus.domain.SuggestionGenerator
 import dev.klaiber.cirrus.domain.agents.AgentRunner
 import dev.klaiber.cirrus.domain.agents.AgentScheduler
@@ -36,9 +39,13 @@ import dev.klaiber.cirrus.domain.spotify.SpotifyRedirectListener
 import dev.klaiber.cirrus.domain.spotify.SpotifySession
 import dev.klaiber.cirrus.domain.tools.CirrusTool
 import dev.klaiber.cirrus.domain.tools.DescribeSettingsTool
+import dev.klaiber.cirrus.domain.tools.DownloadFileTool
 import dev.klaiber.cirrus.domain.tools.DeviceToolSet
 import dev.klaiber.cirrus.domain.tools.ForgetTool
 import dev.klaiber.cirrus.domain.tools.GitHubToolSet
+import dev.klaiber.cirrus.domain.tools.ListSkillsTool
+import dev.klaiber.cirrus.domain.tools.SkillToolSet
+import dev.klaiber.cirrus.domain.tools.UseSkillTool
 import dev.klaiber.cirrus.domain.tools.McpToolSet
 import dev.klaiber.cirrus.domain.tools.MemoryToolSet
 import dev.klaiber.cirrus.domain.tools.RecallTool
@@ -182,6 +189,33 @@ class AppContainer(
         .retryOnConnectionFailure(true)
         .build()
 
+    /**
+     * The client for hosts Cirrus has no account with: the skills registry, and downloaded files.
+     *
+     * Carries no credential, which is the whole reason it is not one of the others. `download_file`
+     * fetches a URL the *model* chose, and every client above attaches somebody's key in an
+     * interceptor — so reusing one would hand that key to a host named in a chat message. Bounded
+     * on every axis, unlike [mcpHttp]: a download has no long-lived stream to wait on, and one that
+     * never finishes is a hung tool call in the middle of a turn.
+     */
+    private val plainHttp: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("User-Agent", "Cirrus/1.0.0 (Desktop)")
+                    .build(),
+            )
+        }
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
+        // Redirects are the norm for a file URL — a CDN, a shortener, an http→https bounce — and
+        // the final URL is reported back so the model knows where the bytes came from.
+        .followRedirects(true)
+        .retryOnConnectionFailure(true)
+        .build()
+
     private val gitHubHttp: OkHttpClient = OkHttpClient.Builder()
         .addInterceptor { chain ->
             val builder = chain.request().newBuilder()
@@ -249,6 +283,13 @@ class AppContainer(
         scope = scope,
     )
 
+    val skillsRegistryClient = SkillsRegistryClient(plainHttp, wireJson)
+
+    val skillRepository = SkillRepository(
+        store = JsonStore(File(dataDir, "skills.json"), persistenceJson),
+        registry = skillsRegistryClient,
+    )
+
     val agentRepository = AgentRepository(
         store = JsonStore(File(dataDir, "agents.json"), persistenceJson),
         conversations = conversationRepository,
@@ -267,6 +308,7 @@ class AppContainer(
 
     private val webSearchTool = WebSearchTool(ollamaClient, settingsRepository)
     private val webFetchTool = WebFetchTool(ollamaClient)
+    private val downloadFileTool = DownloadFileTool(plainHttp, shellWorkspace)
 
     private val gitHubToolSet = GitHubToolSet(
         listRepos = ListReposTool(gitHubClient),
@@ -315,6 +357,12 @@ class AppContainer(
         ),
     )
 
+    private val skillToolSet = SkillToolSet(
+        repository = skillRepository,
+        list = ListSkillsTool(skillRepository),
+        use = UseSkillTool(skillRepository),
+    )
+
     private val settingsTool = DescribeSettingsTool(settingsRepository)
 
     private val mcpToolSet = McpToolSet(repository = mcpServerRepository, client = mcpClient)
@@ -322,9 +370,11 @@ class AppContainer(
     val toolRegistry = ToolRegistry(
         webSearchTool = webSearchTool,
         webFetchTool = webFetchTool,
+        downloadFileTool = downloadFileTool,
         gitHubTools = gitHubToolSet,
         memoryTools = memoryToolSet,
         notificationTool = notificationTool,
+        skillTools = skillToolSet,
         deviceTools = deviceToolSet,
         spotifyTools = spotifyToolSet,
         settingsTool = settingsTool,
@@ -350,11 +400,23 @@ class AppContainer(
      * Read-aloud, on the application scope for the reason turns are: audio outlives the screen
      * that started it.
      */
+    /**
+     * What gets spoken, as opposed to what was written. Built here rather than inside the
+     * controller because it needs the engine and the model catalogue, and the controller's job is
+     * only to make sound come out.
+     */
+    private val spokenSummary = SpokenSummary(
+        engine = chatEngine,
+        settings = settingsRepository,
+        models = modelRepository,
+    )
+
     val speechController = SpeechController(
         cacheDir = File(dataDir, "cache"),
         elevenLabs = elevenLabsClient,
         systemVoice = SystemVoice(),
         settingsRepository = settingsRepository,
+        spokenSummary = spokenSummary,
         scope = scope,
     )
 
@@ -413,6 +475,7 @@ class AppContainer(
         conversationRepository.load()
         memoryRepository.load()
         mcpServerRepository.load()
+        skillRepository.load()
         agentRepository.load()
         agentScheduler.syncAll()
         consolidationScheduler.sync()

@@ -7,6 +7,7 @@ import dev.klaiber.cirrus.data.remote.spotify.SpotifyCredentials
 import dev.klaiber.cirrus.domain.model.AppSettings
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.GenerationParams
+import dev.klaiber.cirrus.domain.model.ReadAloudMode
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -181,7 +182,11 @@ class SettingsRepository(
 
     // ---- Read aloud ----------------------------------------------------------------------------
 
+    suspend fun setSkillsEnabled(enabled: Boolean) = update { it.copy(skillsEnabled = enabled) }
+
     suspend fun setReadAloudEnabled(enabled: Boolean) = update { it.copy(readAloudEnabled = enabled) }
+
+    suspend fun setReadAloudMode(mode: ReadAloudMode) = update { it.copy(readAloudMode = mode) }
 
     suspend fun setSpeechEngine(engine: SpeechEngine) = update { it.copy(speechEngine = engine) }
 

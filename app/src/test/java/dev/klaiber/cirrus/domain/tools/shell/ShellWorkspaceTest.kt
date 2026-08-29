@@ -2,6 +2,8 @@ package dev.klaiber.cirrus.domain.tools.shell
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -116,6 +118,41 @@ class ShellWorkspaceTest {
 
         assertTrue(workspace.sweep().isEmpty())
         assertEquals(1, workspace.topics().size)
+    }
+
+    /**
+     * The budget is a refusal, not a deletion, and that distinction is the whole point of it.
+     *
+     * [ShellWorkspace.trimTo] does enforce a cap, but it enforces it by deleting oldest-first
+     * across every topic — so the price of one runaway command is somebody else's working files,
+     * paid silently. Refusing the *next* command instead costs nothing that already exists and
+     * tells the model something it can act on.
+     */
+    @Test
+    fun `a topic over its byte budget refuses the next command and says which tool fixes it`() {
+        write("build", "page.html", "x".repeat(3_000))
+
+        assertNull("well under the cap", workspace.budgetProblem("build", maxBytes = 10_000))
+
+        val problem = workspace.budgetProblem("build", maxBytes = 2_000)
+        assertNotNull(problem)
+        assertTrue("it has to name the topic", "build" in problem!!)
+        assertTrue("and the way out", "clean_workspace" in problem)
+    }
+
+    /** Four hundred tiny files stay under any byte cap and are still not one job. */
+    @Test
+    fun `a topic over its file budget is caught even while it is small`() {
+        repeat(6) { write("split", "part-$it.txt") }
+
+        assertNull(workspace.budgetProblem("split", maxFiles = 10))
+        assertNotNull(workspace.budgetProblem("split", maxFiles = 3))
+    }
+
+    @Test
+    fun `an unused topic has no budget problem`() {
+        assertNull(workspace.budgetProblem("never-used"))
+        assertNull(workspace.budgetProblem(null))
     }
 
     /** Oldest first, so the file the last command wrote is not deleted to make room for itself. */

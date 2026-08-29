@@ -33,6 +33,10 @@ import javax.sound.sampled.SourceDataLine
  * time — starting another stops the first, which is the only behaviour that makes sense when the
  * output is audio.
  *
+ * What gets spoken is not necessarily the whole answer. [SpokenSummary] decides that, and for
+ * anything long it is a spoken summary instead — see that class for why. This one is still only
+ * responsible for making sound come out.
+ *
  * Two engines sit behind the same call. The system voice is free, offline and — unlike on Android,
  * where there is always an engine — only there if the desktop happens to ship one; ElevenLabs
  * sounds enormously better and costs characters, so it is opt-in and needs a key. Long answers are
@@ -46,6 +50,7 @@ class SpeechController @Inject constructor(
     private val elevenLabs: ElevenLabsClient,
     private val systemVoice: SystemVoice,
     private val settingsRepository: SettingsRepository,
+    private val spokenSummary: SpokenSummary,
     private val scope: CoroutineScope,
 ) {
 
@@ -87,13 +92,20 @@ class SpeechController @Inject constructor(
 
     private fun speak(messageId: String, text: String) {
         stop()
-        val spoken = text.trim()
-        if (spoken.isEmpty()) return
+        if (text.isBlank()) return
 
         _speaking.value = Speaking(messageId, isPreparing = true)
         job = scope.launch {
             val settings = settingsRepository.current.value
             try {
+                // Inside the job, and therefore inside `isPreparing`. Deciding what to say is a
+                // request like any other: it can be slow, it must be cancellable by the same stop
+                // button, and the spinner that already covers "fetching the first audio" is exactly
+                // the right thing to cover it with. Doing it in the caller would leave a second or
+                // two where the button had been pressed and nothing had visibly happened.
+                val spoken = spokenSummary.forSpeech(text)
+                if (spoken.isBlank()) return@launch
+
                 val useHosted = settings.speechEngine == SpeechEngine.ELEVENLABS &&
                     settings.hasElevenLabsKey
                 if (useHosted) {

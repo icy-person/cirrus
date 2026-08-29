@@ -25,6 +25,10 @@ import dev.klaiber.cirrus.domain.tools.github.ReadFileTool
 import dev.klaiber.cirrus.domain.tools.github.ReviewPullRequestTool
 import dev.klaiber.cirrus.domain.tools.github.SearchCodeTool
 import dev.klaiber.cirrus.domain.tools.github.WriteFileTool
+import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
+import dev.klaiber.cirrus.data.repository.SkillRepository
+import dev.klaiber.cirrus.data.remote.skills.SkillsRegistryClient
+import dev.klaiber.cirrus.domain.settings.SettingSwitch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -100,6 +104,18 @@ class ToolRegistryTest {
         registry = ToolRegistry(
             webSearchTool = WebSearchTool(ollama, settings),
             webFetchTool = WebFetchTool(ollama),
+            // Nothing here downloads anything: the workspace is a throwaway directory and no test
+            // below names the tool. It is constructed rather than stubbed so the registry's own
+            // wiring — two switches on one group — is the thing under test.
+            downloadFileTool = DownloadFileTool(
+                OkHttpClient(),
+                ShellWorkspace(
+                    File(
+                        System.getProperty("java.io.tmpdir"),
+                        "cirrus-download-${System.nanoTime()}",
+                    ),
+                ),
+            ),
             gitHubTools = GitHubToolSet(
                 listRepos = ListReposTool(gitHub),
                 searchCode = SearchCodeTool(gitHub),
@@ -118,6 +134,22 @@ class ToolRegistryTest {
                 RememberTool(memories),
                 RecallTool(memories),
                 ForgetTool(memories),
+            ),
+            // An empty store, never loaded: what is under test is the gate rather than what is
+            // behind it, and a skill list would only make the assertions depend on fixture data.
+            skillTools = SkillToolSet(
+                repository = SkillRepository(
+                    store = JsonStore(
+                        File(
+                            System.getProperty("java.io.tmpdir"),
+                            "cirrus-skills-${System.nanoTime()}.json",
+                        ),
+                        json,
+                    ),
+                    registry = SkillsRegistryClient(OkHttpClient(), json),
+                ),
+                list = StubTool("list_skills"),
+                use = StubTool("use_skill"),
             ),
             notificationTool = SendNotificationTool(SilentNotifier()),
             // Stand-ins: what is under test here is the gate rather than what is behind it. Two
@@ -182,6 +214,30 @@ class ToolRegistryTest {
         assertFalse(offeredNames(externalTools = true).contains("remember"))
         assertNull(registry.find("remember", externalTools = true))
     }
+
+    /**
+     * Skills are local, like memory: the instructions came down when the skill was installed, and
+     * reading one costs nothing that leaves the device. Putting them behind the conversation's
+     * external switch would mean the chooser silently stopped working in most conversations.
+     */
+    @Test
+    fun `skill tools are offered even with external tools off, and follow their own switch`() =
+        runBlocking {
+            settings.setSkillsEnabled(true)
+
+            assertTrue(offeredNames(externalTools = false).contains("use_skill"))
+            assertNotNull(registry.find("use_skill", externalTools = false))
+
+            settings.setSkillsEnabled(false)
+
+            assertFalse(offeredNames(externalTools = true).contains("use_skill"))
+            assertNull(registry.find("use_skill", externalTools = true))
+            // Not "unknown tool": the refusal has to name the switch, or the model tells the user
+            // their app cannot do something it shipped with.
+            assertTrue(
+                registry.explainRefusal("use_skill").contains(SettingSwitch.SKILLS.path),
+            )
+        }
 
     @Test
     fun `the notification tool follows its own setting`() = runBlocking {

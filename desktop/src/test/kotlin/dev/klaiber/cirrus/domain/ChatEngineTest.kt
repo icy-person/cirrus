@@ -21,6 +21,7 @@ import dev.klaiber.cirrus.domain.model.GenerationParams
 import dev.klaiber.cirrus.domain.model.Role
 import dev.klaiber.cirrus.domain.notify.Notifier
 import dev.klaiber.cirrus.domain.tools.DescribeSettingsTool
+import dev.klaiber.cirrus.domain.tools.DownloadFileTool
 import dev.klaiber.cirrus.domain.tools.DeviceToolSet
 import dev.klaiber.cirrus.domain.tools.ForgetTool
 import dev.klaiber.cirrus.domain.tools.GitHubToolSet
@@ -45,6 +46,12 @@ import dev.klaiber.cirrus.domain.tools.github.ReadFileTool
 import dev.klaiber.cirrus.domain.tools.github.ReviewPullRequestTool
 import dev.klaiber.cirrus.domain.tools.github.SearchCodeTool
 import dev.klaiber.cirrus.domain.tools.github.WriteFileTool
+import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
+import dev.klaiber.cirrus.data.remote.skills.SkillsRegistryClient
+import dev.klaiber.cirrus.data.repository.SkillRepository
+import dev.klaiber.cirrus.domain.tools.ListSkillsTool
+import dev.klaiber.cirrus.domain.tools.SkillToolSet
+import dev.klaiber.cirrus.domain.tools.UseSkillTool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -123,9 +130,29 @@ class ChatEngineTest {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         )
 
+        val skillsFile = File.createTempFile("cirrus-engine-skills-", ".json").also { it.delete() }
+        temporaryFiles += skillsFile
+        // Empty and never loaded: the tool loop is what is under test, not what a skill would say.
+        val skillRepository = SkillRepository(
+            store = JsonStore(skillsFile, json),
+            registry = SkillsRegistryClient(OkHttpClient(), json),
+        )
+
         return ToolRegistry(
             webSearchTool = WebSearchTool(client, settingsRepository),
             webFetchTool = WebFetchTool(client),
+            // Nothing here downloads anything: the workspace is a throwaway directory and no test
+            // below names the tool. It is constructed rather than stubbed so the registry's own
+            // wiring — two switches on one group — is the thing under test.
+            downloadFileTool = DownloadFileTool(
+                OkHttpClient(),
+                ShellWorkspace(
+                    File(
+                        System.getProperty("java.io.tmpdir"),
+                        "cirrus-download-${System.nanoTime()}",
+                    ),
+                ),
+            ),
             gitHubTools = GitHubToolSet(
                 listRepos = ListReposTool(gitHubClient),
                 searchCode = SearchCodeTool(gitHubClient),
@@ -144,6 +171,11 @@ class ChatEngineTest {
                 RememberTool(memoryRepository),
                 RecallTool(memoryRepository),
                 ForgetTool(memoryRepository),
+            ),
+            skillTools = SkillToolSet(
+                repository = skillRepository,
+                list = ListSkillsTool(skillRepository),
+                use = UseSkillTool(skillRepository),
             ),
             notificationTool = SendNotificationTool(RecordingNotifier()),
             deviceTools = DeviceToolSet(shell = emptyList(), apps = emptyList()),
