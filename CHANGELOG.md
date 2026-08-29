@@ -9,6 +9,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [2.0.0] - 2026-08-29
+
+The major number moves because the model gains a new kind of capability rather than another tool:
+it can now be handed somebody else's method for a job. Everything else here is a correction to
+something the app was already doing and doing badly — reading an answer aloud in full, and letting a
+model spend a turn discovering it cannot build a website on a phone.
+
+### Added
+
+- **Skills, and a library to install them from.** A skill is a page of instructions for one kind of
+  job, written by somebody who does it, published to the public registry at
+  [skills.sh](https://skills.sh) — the index behind `npx skills` — and installed into Cirrus from a
+  new **Settings → Skills** screen with an Explore page beside it.
+
+  The design that matters is the chooser. Only the *names and one-line descriptions* of enabled
+  skills go into the system prompt; the instructions themselves arrive when the model calls
+  `use_skill`, having decided this is the job. Putting every installed skill's body in the prompt
+  would cost thousands of tokens on every turn of every conversation, nearly all of it about work
+  nobody is doing — so a description is the advertisement, the body is the cost, and nothing pays
+  the cost until it is worth paying. `list_skills` searches a longer library than the brief lists.
+
+  Two things follow from these being written by strangers, for a different program. Most of the
+  registry assumes a coding agent with a terminal and a checkout, so the instructions arrive
+  attached to a sentence saying to take the method and ignore everything that assumes a development
+  machine — attached to them, because a rule in the system prompt is read before the skill and
+  forgotten by the time it contradicts one. And a skill can tell the model to do something but
+  cannot make it possible: every existing gate still applies, so a skill reaching for a write action
+  gets the same refusal any other route would.
+
+  The Explore page opens on curated subject chips rather than an empty search box. That is the
+  registry's shape rather than a flourish: it has no endpoint that lists everything and rejects a
+  query under two characters, so the chips are ordinary searches through the same call — no second
+  data path, and no hand-kept list that can go stale. Nothing installs on a single tap; the card
+  opens a preview with the real `SKILL.md` in it first, alongside the install count, which is the
+  only signal of trust the registry offers.
+
+  Reference files a package ships are named and not downloaded. Cirrus can neither fetch them on
+  demand nor execute anything, so a skill whose instructions say "see `references/testing.md`" is
+  told, at the moment it is loaded, that the file is not here — otherwise the model goes looking and
+  spends a turn concluding something is broken.
+
+- **`download_file`**, which fetches a URL's actual bytes into the shell workspace. `web_fetch`
+  flattens a page to prose, which is right for "what does this article say" and wrong for
+  everything else: the markup is gone, and so is the CSV's comma structure and the JSON. The file
+  lands in the topic the model is already working in, so `grep`, `wc` and `head` are right there and
+  it can be looked at three times without being fetched three times. It reads in bounded chunks
+  against the topic's own budget rather than a number of its own — on a phone, from a URL a model
+  chose, holding a whole file in memory before anything can decide it is too large is the one
+  failure worth extra code to avoid.
+
+### Changed
+
+- **Read aloud speaks a summary of a long answer, not the whole of it.** Speech is linear and runs
+  at about two and a half words a second, so an answer written to be skimmed — headings to jump
+  between, a table to glance at, a code block to ignore — is six minutes of audio with no way to
+  skip the part you did not need. People pressed play and stopped it a minute in.
+
+  A long answer is now condensed by the model you are already using into two or three spoken
+  paragraphs: what it concluded, the reasoning that matters, anything you would be misled by not
+  hearing, and a closing line saying the full answer is on screen. Short answers are still read word
+  for word, because summarising four sentences produces three, more slowly, having lost something.
+  Every failure — no model configured, a request past its deadline, an empty reply — falls back to a
+  local extract of the opening and the closing, so the button always makes sound. **Voice → How much
+  to read** switches back to the whole answer, for the one case a summary cannot serve: listening to
+  your own text to check it.
+
+- **The shell says no to building things, and says why.** A model that has decided to build a
+  website reached for `npm`, was told it was "not available" alongside a list of what was, read that
+  as an inventory problem, and tried `yarn`, then `pnpm`, then wrote a `package.json` by hand.
+  Compilers, package managers, runtimes, web servers and container tools are now refused by name
+  with the reason the plan cannot work at all — no toolchain on a phone and, since Android 10, no
+  way to install one — and with what to do instead: put the file's contents in the answer, where
+  the user can read and copy them. The same rule is stated once in the system prompt, because every
+  refusal otherwise costs a round trip to discover, and a plan abandoned six commands in has already
+  spent the turn.
+
+- **A scratch topic has a size, and it is announced before it is enforced.** Past a couple of
+  megabytes or forty files, the next command in that topic is refused with the topic named and
+  `clean_workspace` pointed at. The workspace already had a total cap, but it enforced it by
+  deleting oldest-first across every topic — so the price of one runaway command was another job's
+  working files, paid silently. Every command now reports how much of the budget its topic has used,
+  and warns past half: a number that first appears in a refusal is a surprise, and a number watched
+  climbing for three commands is a budget.
+
 ## [1.9.0] - 2026-08-23
 
 ### Added
@@ -544,7 +628,8 @@ do things.
   or bridges its tools into the registry.
 - LaTeX is mapped to Unicode, not typeset. There is no layout, so fractions render as `a/b`.
 
-[Unreleased]: https://github.com/klaibercore/cirrus/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/klaibercore/cirrus/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/klaibercore/cirrus/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/klaibercore/cirrus/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/klaibercore/cirrus/compare/v1.6.0...v1.7.0
