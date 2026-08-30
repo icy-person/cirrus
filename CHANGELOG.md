@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [2.1.1] - 2026-08-30
+
+### Changed
+
+- **`save_file` is behind the write switch.** It shipped in 2.1.0 as though it were not a write, on
+  the reasoning that a file in your Downloads is the thing you asked for and deleting it is
+  something you can do without us. That argues from what was probably wanted, and the switch does
+  not: what makes something a write here is that the effect outlives the turn, happens outside
+  Cirrus, and cannot be undone by calling the same tool again. Saving a file meets all three — it
+  lands in shared storage, which on Android outlives Cirrus being uninstalled, and calling it twice
+  produces `totals (1).csv` rather than taking the first copy back.
+
+  So it now needs **Settings → Tools → Allow write actions**, which is off by default. A model asked
+  for a file with the switch off is refused and told which switch it is, so what you see is an offer
+  to turn it on rather than a failure — and it is told to put the contents in its answer as well, so
+  the work is not lost either way. The Files screen's own download button is unaffected: that is you
+  pressing it, not the model.
+
 ## [2.1.0] - 2026-08-30
 
 ### Added
@@ -737,7 +755,8 @@ do things.
   or bridges its tools into the registry.
 - LaTeX is mapped to Unicode, not typeset. There is no layout, so fractions render as `a/b`.
 
-[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/klaibercore/cirrus/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/klaibercore/cirrus/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/klaibercore/cirrus/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/klaibercore/cirrus/compare/v1.9.0...v2.0.0
