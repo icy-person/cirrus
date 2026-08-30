@@ -53,8 +53,8 @@ android {
         applicationId = "dev.klaiber.cirrus"
         minSdk = 29
         targetSdk = 37
-        versionCode = 15
-        versionName = "2.0.0"
+        versionCode = 16
+        versionName = "2.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }

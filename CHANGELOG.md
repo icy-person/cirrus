@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [2.0.1] - 2026-08-30
+
+Five fixes, and four of them have the same shape: Cirrus did something
+defensible, said nothing about it, and the result was indistinguishable from
+the app losing your work.
+
 ### Fixed
 
 - **A downloaded file now reaches you.** `download_file` saved only into the shell's scratch
@@ -681,7 +689,8 @@ do things.
   or bridges its tools into the registry.
 - LaTeX is mapped to Unicode, not typeset. There is no layout, so fractions render as `a/b`.
 
-[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/klaibercore/cirrus/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/klaibercore/cirrus/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/klaibercore/cirrus/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/klaibercore/cirrus/compare/v1.7.0...v1.8.0
