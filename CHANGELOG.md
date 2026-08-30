@@ -7,7 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **A downloaded file now reaches you.** `download_file` saved only into the shell's scratch
+  workspace, which lives inside the app's private storage — so "downloaded to expenses/report.csv"
+  described a file you had no way to open. That is worse than a failure, because a failure would at
+  least have been actionable. The file now also lands in your Downloads folder, through MediaStore
+  on Android and `~/Downloads` on the desktop, and the model is told the name it was saved under so
+  it can tell you. The working copy still goes to the scratchpad, since that is the only place the
+  shell can read it, and a model fetching a page purely for its own analysis can pass `save=false`
+  to keep it out of your way.
+
+- **The shell can edit text, and now says so.** Every listed program could always write — the
+  workspace is the only place any of them can reach — but the one-line summary the model reads split
+  them into "read-only" and "writes" and put `sed` on the wrong side. Asked to change a line in a
+  file it had just written, a model concluded it had no way to do it, when `sed -i` had been allowed
+  the whole time. The summary now says what the check actually enforces, the tool description gives
+  the recipes for an in-place edit and a read-and-rewrite, the command length cap goes from 500 to
+  1,200 characters (a `sed` with three substitutions and a filename is three hundred before anything
+  unusual has happened), and `fmt`, `column`, `expand`, `unexpand`, `pr`, `split`, `csplit`,
+  `numfmt`, `iconv`, `tsort` and `realpath` join the list.
+
+- **Scratch files stop disappearing mid-job.** The workspace was swept before *every* command, with
+  a forty-five-minute idle window — so a topic that crossed that line between two steps of one job
+  vanished underneath the model, which from the transcript is indistinguishable from the app losing
+  a file. The sweep is now rate-limited to once every thirty minutes with a day's idle window, so no
+  job of a realistic length spans one at all. The process-start wipe is gone too: starting the app
+  used to clear everything, so a conversation picked up the next morning had lost what it was
+  working on. What is dropped at startup now is only what cannot belong to anything — scratchpads
+  whose conversation has been deleted, and anything untouched for a week.
+
+- **Each conversation gets its own scratchpad.** Topics were global, so two threads both working in
+  a topic called "notes" wrote into the same directory: one thread's files turned up in the other's
+  listing, and `clean_workspace` in either took both. Files are now scoped to the conversation that
+  made them, which also means a thread's scratch work goes when the thread does.
+
+- **Agents fire when they are supposed to.** Two separate bugs, one per platform, with the same
+  symptom.
+
+  On Android the clock was WorkManager, which is designed to defer: under Doze it holds a job for
+  hours to line it up with a maintenance window, and a phone left alone overnight is in Doze at
+  exactly the moment a morning agent is due. The briefing arrived whenever the phone was next picked
+  up. Agents are now booked as alarms, which Doze does not hold, with WorkManager still running the
+  generation once the alarm has fired. Alarms do not survive a reboot the way WorkManager's queue
+  did, so they are re-booked on boot and after an update. This also fixed a second fault underneath:
+  the worker re-booked itself under the same unique work name it was running as, with a policy that
+  cancels running work, so it was cancelling itself on the way out.
+
+  On the desktop the wait was a `delay` for a duration, and `delay` is measured on a monotonic clock
+  that does not advance while a laptop is suspended. An agent booked at 23:00 to fire in eight and a
+  half hours still believed it had eight and a half hours to go when the lid opened at 07:45, and
+  went off some time that afternoon — every agent scheduled overnight, which is most of them. The
+  wait is now against the wall clock, checked once a minute, so a machine that slept through the
+  moment notices as soon as it wakes. A run up to six hours late is still taken; anything older is
+  skipped, because yesterday's briefing is not this morning's.
 
 ## [2.0.0] - 2026-08-29
 

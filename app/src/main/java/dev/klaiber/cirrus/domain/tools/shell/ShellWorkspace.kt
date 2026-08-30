@@ -3,33 +3,28 @@ package dev.klaiber.cirrus.domain.tools.shell
 import java.io.File
 
 /**
- * The one directory a command may write to, divided into topics.
+ * Every scratch file the shell has, divided by the conversation that made it.
  *
- * Every command runs with a topic directory as its working directory, and [CommandPolicy] refuses
- * absolute paths and `..`, so "the topic" and "everywhere this command can reach" are the same
- * place. That is what makes the write-capable programs — `rm`, `mv`, `tee` — safe to offer at all:
- * the worst a mistake can do is destroy scratch files that were never meant to outlive the
- * conversation, and it cannot even reach the ones belonging to a different job.
+ * A [Scratchpad] is one conversation's working directory, and the workspace is the shelf they sit
+ * on. The split exists because a flat workspace shared by every thread was wrong in two ways that
+ * both look, from the transcript, like the app losing your work. Two conversations both working in
+ * a topic called "notes" wrote into the same directory, so one thread's files turned up in
+ * another's listing and `clean_workspace` in either took both. And with one shared topic cap, a
+ * busy conversation swept away the topics belonging to a thread nobody had touched that hour but
+ * which the user was plainly still in the middle of.
  *
- * Topics exist because the models use this constantly, and a single flat scratch directory turns
- * into a pile of `out.txt`, `out2.txt`, `tmp.txt` within one long session — at which point the
- * model starts reading the wrong file, or refuses to overwrite its own. A topic is a name for the
- * job in hand (`invoice-totals`, `log-counts`); files inside one belong together, and cleaning up
- * is a decision about a job rather than about a filename.
+ * Scoping to the conversation fixes both without any new rules: a scratchpad's lifetime is its
+ * thread's, its topic budget is its own, and cleaning up one cannot reach another. It also makes
+ * the honest answer to "where did my file go?" available — it is in the thread you made it in.
  *
- * It lives under the cache directory on purpose. Android is allowed to reclaim it under storage
- * pressure, which is the correct fate for work nobody asked to keep, and it is excluded from backup
- * for free.
+ * The whole tree lives under the cache directory on purpose. Android is allowed to reclaim it
+ * under storage pressure, which is the correct fate for work nobody asked to keep, and it is
+ * excluded from backup for free.
  *
- * Cleaning up is not left to good intentions, and that is deliberate at four levels. [clear] runs
- * when the process starts, so a session never inherits the last one's mess; [sweep] runs before
- * every command and retires topics nothing has touched for a while; [trimTo] caps the total so a
- * runaway `seq` cannot fill the phone. Those three delete quietly. [budgetProblem] is the one that
- * speaks — past a per-topic size it refuses the *next* command, with the reason and the remedy —
- * and it is the only one of the four the model can learn anything from, which is why it is the one
- * that stops a job going wrong rather than tidying up after it has. The model is *also* told to
- * tidy up, but a rule the model has to remember at the end of a session is the one rule it will
- * not remember.
+ * Housekeeping is the workspace's job rather than something every command pays for. [prune] runs at
+ * startup and drops scratchpads whose conversations are gone, plus anything nobody has touched in a
+ * week; [trimTo] is the backstop that caps the total. Neither runs mid-turn. What a command still
+ * pays for is [Scratchpad.budgetProblem], which refuses rather than deletes.
  */
 class ShellWorkspace(private val root: File) {
 
@@ -37,6 +32,170 @@ class ShellWorkspace(private val root: File) {
     fun directory(): File = root.apply { mkdirs() }
 
     /** Where files land, as the model should refer to it when explaining itself to the user. */
+    val path: String get() = root.absolutePath
+
+    /**
+     * The scratchpad for one conversation.
+     *
+     * A null id — a tool called outside a turn, or a test — gets the shared pad rather than an
+     * error. Nothing is lost by that: the shared pad behaves exactly like any other, and the
+     * alternative is a tool that cannot run at all in the one situation nobody is watching.
+     */
+    fun scratchpad(conversationId: String?): Scratchpad =
+        Scratchpad(File(root, scopeName(conversationId)))
+
+    /** Every scratchpad currently on disk, most recently touched first. */
+    fun scratchpads(): List<File> = (root.listFiles()?.asList() ?: emptyList())
+        .filter { it.isDirectory }
+        .sortedByDescending { it.lastModifiedDeeply() }
+
+    fun usedBytes(): Long = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /** Every file in the workspace, for `system_info`'s summary. */
+    fun entries(): List<Scratchpad.Entry> = root
+        .walkTopDown()
+        .filter { it != root }
+        .map {
+            Scratchpad.Entry(
+                path = it.toRelativeString(root),
+                isDirectory = it.isDirectory,
+                sizeBytes = it.length(),
+                modifiedAt = it.lastModified(),
+            )
+        }
+        .sortedBy { it.path }
+        .toList()
+
+    /**
+     * Startup housekeeping: drop what belongs to nothing, and what nobody has come back to.
+     *
+     * This replaces wiping the workspace on every process start, which was a backstop that cost
+     * far more than it saved. A conversation is a thing you return to — the next morning, after an
+     * update, after the phone decided to restart — and finding that the file you made yesterday is
+     * gone because the app was closed in between is indistinguishable from a bug. Two rules that
+     * cannot make that mistake: a scratchpad whose conversation has been deleted has nothing left
+     * to belong to, and one nobody has touched in [staleMs] is not a job in hand.
+     *
+     * [liveConversationIds] being empty is treated as "not known yet" rather than as "every thread
+     * was deleted". A repository that has not finished loading must never look like a user who
+     * cleared their history, because the two would be told apart only by the files that had
+     * already gone.
+     */
+    fun prune(
+        liveConversationIds: Set<String>,
+        staleMs: Long = STALE_MS,
+        now: Long = System.currentTimeMillis(),
+    ): List<String> {
+        val removed = mutableListOf<String>()
+        scratchpads().forEach { directory ->
+            val id = directory.name
+                .takeIf { it.startsWith(SCOPE_PREFIX) }
+                ?.removePrefix(SCOPE_PREFIX)
+            val orphaned = id != null &&
+                liveConversationIds.isNotEmpty() &&
+                id !in liveConversationIds
+            val stale = now - directory.lastModifiedDeeply() > staleMs
+            if ((orphaned || stale) && directory.deleteRecursively()) removed += directory.name
+        }
+        return removed
+    }
+
+    /** Everything, for the wipe a user can still ask for. */
+    fun clear(): Int {
+        if (!root.exists()) return 0
+        val removed = root.walkTopDown().count { it != root && it.isFile }
+        root.deleteRecursively()
+        root.mkdirs()
+        return removed
+    }
+
+    /**
+     * Deletes oldest-first until the whole workspace fits in [maxBytes].
+     *
+     * Oldest rather than largest: the one big file a command has just written is usually the point
+     * of the command, and deleting it to make room for itself is the one behaviour that would be
+     * worse than doing nothing.
+     */
+    fun trimTo(maxBytes: Long = MAX_BYTES): Int {
+        var used = usedBytes()
+        if (used <= maxBytes) return 0
+
+        var removed = 0
+        root.walkTopDown()
+            .filter { it.isFile }
+            .sortedBy { it.lastModified() }
+            .forEach { file ->
+                if (used <= maxBytes) return@forEach
+                val size = file.length()
+                if (file.delete()) {
+                    used -= size
+                    removed++
+                }
+            }
+        return removed
+    }
+
+    companion object {
+        /** Generous for text, small enough that a mistake is not a storage incident. */
+        const val MAX_BYTES: Long = 16L * 1024 * 1024
+
+        /**
+         * How long a scratchpad survives with nobody touching it.
+         *
+         * A week, where the old idle sweep used forty-five minutes. That number was chosen when a
+         * topic was a job inside one sitting; a scratchpad is a conversation, and people come back
+         * to conversations days later expecting to find what they left in them.
+         */
+        const val STALE_MS: Long = 7L * 24 * 60 * 60 * 1000
+
+        /** Where a call with no conversation behind it lands. */
+        const val SHARED_SCOPE = "shared"
+
+        private const val SCOPE_PREFIX = "c-"
+
+        /**
+         * A conversation id, made safe as a directory name.
+         *
+         * Ids are UUIDs, so this normally changes nothing — but an id reaches here from a stored
+         * row rather than from a command, so it never passes [CommandPolicy], and the same rule
+         * that stops a topic name meaning somewhere else has to apply to it too.
+         */
+        fun scopeName(conversationId: String?): String {
+            val slug = conversationId.orEmpty().filter { it.isLetterOrDigit() || it == '-' }.take(48)
+            return if (slug.isEmpty()) SHARED_SCOPE else "$SCOPE_PREFIX$slug"
+        }
+    }
+}
+
+/** The newest thing anywhere inside, or the directory's own stamp when it holds no files. */
+private fun File.lastModifiedDeeply(): Long =
+    walkTopDown().filter { it.isFile }.maxOfOrNull { it.lastModified() } ?: lastModified()
+
+/**
+ * One conversation's scratch files, divided by job.
+ *
+ * Every command runs with a topic directory as its working directory, and [CommandPolicy] refuses
+ * absolute paths and `..`, so "the topic" and "everywhere this command can reach" are the same
+ * place. That is what makes the write-capable programs — `rm`, `mv`, `tee`, `sed -i` — safe to
+ * offer at all: the worst a mistake can do is destroy scratch files that were never meant to
+ * outlive the conversation, and it cannot even reach the ones belonging to a different job, or to
+ * a different thread.
+ *
+ * Topics exist because the models use this constantly, and a single flat directory turns into a
+ * pile of `out.txt`, `out2.txt`, `tmp.txt` within one long session — at which point the model
+ * starts reading the wrong file, or refuses to overwrite its own. A topic is a name for the job in
+ * hand (`invoice-totals`, `log-counts`); files inside one belong together, and cleaning up is a
+ * decision about a job rather than about a filename.
+ *
+ * Cleaning up no longer happens on every command. [sweep] still retires topics nobody has come back
+ * to, but it is rate-limited to [SWEEP_INTERVAL_MS] and its idle window is a day — because a sweep
+ * running before every single command was deleting files between one step of a job and the next.
+ * The model wrote `totals.csv`, spent two commands thinking about it, and found it gone.
+ * [budgetProblem] is the rule that still applies every time, and it refuses rather than deleting.
+ */
+class Scratchpad(private val root: File) {
+
+    /** Where these files live, for a tool that has to explain itself. */
     val path: String get() = root.absolutePath
 
     /**
@@ -65,10 +224,10 @@ class ShellWorkspace(private val root: File) {
         }
         .sortedByDescending { it.modifiedAt }
 
-    /** Every file currently in the workspace, deepest last, with sizes. */
+    /** Every file in this scratchpad, deepest last, with sizes. */
     fun entries(): List<Entry> = root
         .walkTopDown()
-        .filter { it != root }
+        .filter { it != root && it.name != SWEEP_MARKER }
         .map { Entry(it.toRelativeString(root), it.isDirectory, it.length(), it.lastModified()) }
         .sortedBy { it.path }
         .toList()
@@ -90,7 +249,7 @@ class ShellWorkspace(private val root: File) {
     fun usedBytes(): Long = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 
     /**
-     * Empties the workspace, or one topic of it, and reports how many files went.
+     * Empties this scratchpad, or one topic of it, and reports how many files went.
      *
      * The directory itself is recreated rather than left missing: a working directory that does not
      * exist makes the *next* command fail with an error about the shell rather than about itself.
@@ -98,30 +257,35 @@ class ShellWorkspace(private val root: File) {
     fun clear(topic: String? = null): Int {
         val target = if (topic == null) root else File(root, topicName(topic))
         if (!target.exists()) return 0
-        val removed = target.walkTopDown().count { it != target && it.isFile }
+        val removed = target.walkTopDown().count { it != target && it.isFile && it.name != SWEEP_MARKER }
         target.deleteRecursively()
         if (target == root) root.mkdirs()
         return removed
     }
 
     /**
-     * Retires topics nobody is working on any more, and reports which ones went.
+     * Retires topics nobody is working on any more, at most once every [SWEEP_INTERVAL_MS].
      *
-     * Two rules, and the second is the one that matters. Idle time answers the ordinary case: a job
-     * finished half an hour ago is finished, whether or not anything said so. The count cap answers
-     * the case idle time cannot — a session that opens a fresh topic every couple of minutes stays
-     * under the idle window forever while accumulating twenty directories, which is the flat scratch
-     * directory again with extra steps.
+     * The rate limit is the fix for what this used to get wrong. Running before every single
+     * command meant the workspace was re-examined dozens of times in a turn, and a topic that
+     * crossed the idle line between two steps of one job vanished underneath the model — which
+     * reads, from the transcript, exactly like the app losing a file. Now a job of any realistic
+     * length runs from start to finish without a sweep happening at all, and the sweep that does
+     * eventually run is looking at a day of idleness rather than three quarters of an hour.
      *
-     * Reporting rather than doing it silently is deliberate: the model may be about to read a file
-     * from a topic that has just been swept, and "invoice-totals was cleaned up" is something it can
-     * act on, where a file that has quietly stopped existing is a puzzle it will spend a turn on.
+     * Reporting rather than doing it silently stays: the model may be about to read a file from a
+     * topic that has just been swept, and "invoice-totals was cleaned up" is something it can act
+     * on, where a file that has quietly stopped existing is a puzzle it will spend a turn on.
      */
     fun sweep(
         idleMs: Long = IDLE_MS,
         maxTopics: Int = MAX_TOPICS,
         now: Long = System.currentTimeMillis(),
+        force: Boolean = false,
     ): List<String> {
+        if (!force && now - lastSweptAt() < SWEEP_INTERVAL_MS) return emptyList()
+        markSwept(now)
+
         val topics = topics()
         val stale = topics.filter { now - it.modifiedAt > idleMs }
         // Newest first, so the ones over the cap are the oldest survivors.
@@ -137,19 +301,16 @@ class ShellWorkspace(private val root: File) {
      * Why this topic may not be written to any further, or null while it may.
      *
      * Checked *before* a command rather than enforced after one, because after is too late to be
-     * useful: [trimTo] does run and does delete, but it deletes oldest-first across the whole
-     * workspace, which means the price of one runaway command is somebody else's job. A refusal in
-     * front is the version the model can act on — it names the topic, the size, and the tool that
-     * fixes it, and the very next call is a `clean_workspace` rather than another megabyte.
+     * useful: [ShellWorkspace.trimTo] does run and does delete, but it deletes oldest-first across
+     * the whole workspace, which means the price of one runaway command is somebody else's job. A
+     * refusal in front is the version the model can act on — it names the topic, the size, and the
+     * tool that fixes it, and the very next call is a `clean_workspace` rather than another
+     * megabyte.
      *
      * Two caps rather than one, because they catch different mistakes. Bytes catch the model that
      * has decided to write a website into a scratch directory. The file count catches the one
      * writing `part-001.txt` through `part-400.txt`, which stays well under any byte cap while
      * making the topic listing — and the model's own picture of what it has — useless.
-     *
-     * This is a phone, and the numbers say so. The point is not that a phone could not hold more;
-     * it is that a chat turn producing more than this has stopped doing the thing it was asked to
-     * do, and the sooner it is told, the fewer turns it spends finding out.
      */
     fun budgetProblem(
         topic: String?,
@@ -176,29 +337,23 @@ class ShellWorkspace(private val root: File) {
     }
 
     /**
-     * Deletes oldest-first until the workspace fits in [maxBytes].
+     * When the last sweep ran, kept as a marker file rather than in memory.
      *
-     * Oldest rather than largest: the one big file a command has just written is usually the point
-     * of the command, and deleting it to make room for itself is the one behaviour that would be
-     * worse than doing nothing.
+     * In memory it would reset on every process start — which is exactly when somebody reopens a
+     * conversation, so the first command of the new session would sweep the files they came back
+     * for. On disk it survives, which is the whole point of rate-limiting it at all.
      */
-    fun trimTo(maxBytes: Long = MAX_BYTES): Int {
-        var used = usedBytes()
-        if (used <= maxBytes) return 0
+    private fun lastSweptAt(): Long =
+        File(root, SWEEP_MARKER).takeIf { it.exists() }?.lastModified() ?: 0L
 
-        var removed = 0
-        root.walkTopDown()
-            .filter { it.isFile }
-            .sortedBy { it.lastModified() }
-            .forEach { file ->
-                if (used <= maxBytes) return@forEach
-                val size = file.length()
-                if (file.delete()) {
-                    used -= size
-                    removed++
-                }
+    private fun markSwept(now: Long) {
+        runCatching {
+            root.mkdirs()
+            File(root, SWEEP_MARKER).apply {
+                if (!exists()) createNewFile()
+                setLastModified(now)
             }
-        return removed
+        }
     }
 
     data class Entry(
@@ -217,29 +372,43 @@ class ShellWorkspace(private val root: File) {
     )
 
     companion object {
-        /** Generous for text, small enough that a mistake is not a storage incident. */
-        const val MAX_BYTES: Long = 16L * 1024 * 1024
+        /** Where a command lands when it did not say which job it belongs to. */
+        const val DEFAULT_TOPIC = "scratch"
+
+        /**
+         * How long a topic survives untouched.
+         *
+         * A day, where it used to be forty-five minutes. A conversation left over lunch and picked
+         * up in the afternoon is the ordinary case here, not an abandoned one.
+         */
+        const val IDLE_MS: Long = 24L * 60 * 60 * 1000
+
+        /** Past this many live topics in one conversation, the oldest is not a job in hand. */
+        const val MAX_TOPICS = 16
+
+        /**
+         * The least often a sweep is worth doing.
+         *
+         * The point is that no realistic job spans one: a sequence of commands working on the same
+         * files runs from start to finish without anything being deleted underneath it.
+         */
+        const val SWEEP_INTERVAL_MS: Long = 30L * 60 * 1000
 
         /**
          * What one job may hold before the next command is refused.
          *
-         * Well under [MAX_BYTES], and that gap is the design: the workspace cap is a backstop that
-         * deletes, and this one is a refusal that explains. Two megabytes is several novels' worth
-         * of text — anything asking for more here is building something, and this is a phone.
+         * Well under [ShellWorkspace.MAX_BYTES], and that gap is the design: the workspace cap is a
+         * backstop that deletes, and this one is a refusal that explains. Two megabytes is several
+         * novels' worth of text — anything asking for more here is building something, and this is
+         * a phone.
          */
         const val MAX_TOPIC_BYTES: Long = 2L * 1024 * 1024
 
         /** Past this many files, a topic has stopped being one job. */
         const val MAX_TOPIC_FILES = 40
 
-        /** Where a command lands when it did not say which job it belongs to. */
-        const val DEFAULT_TOPIC = "scratch"
-
-        /** Long enough to survive a conversation that wandered off and came back. */
-        const val IDLE_MS: Long = 45L * 60 * 1000
-
-        /** Past this many live topics, the oldest is not a job in hand any more. */
-        const val MAX_TOPICS = 8
+        /** Hidden, so it never appears in a listing the model reads. */
+        private const val SWEEP_MARKER = ".swept"
 
         private const val MAX_TOPIC_LENGTH = 32
 

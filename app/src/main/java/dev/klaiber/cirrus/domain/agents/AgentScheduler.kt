@@ -28,15 +28,21 @@ import javax.inject.Singleton
 /**
  * Puts agents on the clock.
  *
- * Each agent is scheduled as a *one-shot* at its next due time rather than as periodic work, and
- * re-schedules itself after it runs. Periodic work in WorkManager has a fifteen-minute floor and
- * drifts relative to wall-clock time, which is fine for a sync and useless for "07:30 on weekdays"
- * — the whole point of the feature is that it happens at a time the user chose.
+ * Each agent is booked as an alarm at its next due time, and re-books itself after it runs.
+ *
+ * The alarm is [AgentAlarms]; this class owns *when*, and it owns the queue matching the store.
+ * WorkManager still runs the generation once the alarm has fired, because it has the retry chain,
+ * the network constraint and the Hilt worker factory — but it is no longer the clock. It was, and
+ * it was the reason agents did not fire: WorkManager defers under Doze, a phone left alone
+ * overnight is in Doze at 07:30 by definition, and the run arrived whenever the phone was next
+ * picked up. Periodic work would have been worse still, with a fifteen-minute floor and drift
+ * against the wall clock.
  */
 @Singleton
 class AgentScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val agents: AgentRepository,
+    private val alarms: AgentAlarms,
 ) {
 
     /**
@@ -49,7 +55,12 @@ class AgentScheduler @Inject constructor(
     suspend fun syncAll() {
         val manager = WorkManager.getInstance(context)
         agents.all().forEach { agent ->
-            if (agent.isScheduled) schedule(agent) else manager.cancelUniqueWork(workName(agent.id))
+            if (agent.isScheduled) {
+                schedule(agent)
+            } else {
+                alarms.cancel(agent.id)
+                manager.cancelUniqueWork(workName(agent.id))
+            }
         }
         // Runs that were killed rather than finished — by a reboot, or by the platform reclaiming
         // the app mid-generation — are still marked as in progress. Close them out, or the agents
@@ -59,33 +70,27 @@ class AgentScheduler @Inject constructor(
     }
 
     fun schedule(agent: Agent) {
-        val manager = WorkManager.getInstance(context)
         if (!agent.isScheduled) {
-            manager.cancelUniqueWork(workName(agent.id))
+            cancel(agent.id)
             return
         }
 
-        val delay = delayUntilNextRun(agent)
-        if (delay == Long.MAX_VALUE) {
-            manager.cancelUniqueWork(workName(agent.id))
+        val dueAt = nextRunAt(agent)
+        if (dueAt == null) {
+            cancel(agent.id)
             return
         }
 
-        val request = OneTimeWorkRequestBuilder<AgentWorker>()
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-            .setInputData(Data.Builder().putString(KEY_AGENT_ID, agent.id).build())
-            // A run is a network call; firing it offline just burns a slot and records a failure.
-            .setConstraints(
-                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
-            )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
-            .addTag(TAG)
-            .build()
-
-        manager.enqueueUniqueWork(workName(agent.id), ExistingWorkPolicy.REPLACE, request)
+        // Only the alarm is set here. Enqueuing the work as well — which is what this used to do,
+        // with a delay and `ExistingWorkPolicy.REPLACE` — had a second problem beyond Doze: the
+        // worker re-books itself at the end of its own run, under the same unique name it is
+        // running as, and REPLACE cancels running work. The worker was cancelling itself on its
+        // way out. With the alarm as the clock, nothing enqueues delayed work at all.
+        alarms.set(agent.id, dueAt)
     }
 
     fun cancel(agentId: String) {
+        alarms.cancel(agentId)
         WorkManager.getInstance(context).cancelUniqueWork(workName(agentId))
     }
 
@@ -165,10 +170,12 @@ class AgentScheduler @Inject constructor(
 }
 
 /**
- * The scheduled run itself.
+ * The scheduled run itself, enqueued by [AgentAlarmReceiver] once the alarm has gone off.
  *
- * Re-schedules before returning, so the chain survives reboots and doze: WorkManager persists the
- * next request, and a missed window fires late rather than being skipped.
+ * Re-books before returning, so the chain continues: the alarm that started this one is spent, and
+ * nothing else will set tomorrow's. That makes the `finally`-shaped guarantee below the important
+ * part of this class — an agent that stops being booked because of one bad morning is the failure
+ * the whole file exists to avoid.
  */
 @HiltWorker
 class AgentWorker @AssistedInject constructor(
@@ -204,8 +211,9 @@ class AgentWorker @AssistedInject constructor(
         val retrying = outcome is AgentRunner.Outcome.Retryable &&
             runAttemptCount < AgentScheduler.MAX_ATTEMPTS - 1
 
-        // Re-booking uses the same unique work name as the retry chain, so doing it now would
-        // cancel the very retry we just asked for.
+        // Still not while retrying: `schedule` now sets an alarm rather than enqueuing work, so it
+        // no longer cancels the retry — but booking tomorrow's run before today's has finished
+        // retrying would be booking it from a state that may still change.
         if (!manual && !retrying) {
             agents.byId(agentId)?.let(scheduler::schedule)
         }
@@ -216,5 +224,28 @@ class AgentWorker @AssistedInject constructor(
             // The failure is already recorded on the agent, and on the run, for the user to see.
             else -> Result.failure()
         }
+    }
+}
+
+/**
+ * Puts every agent's alarm back after a reboot or an update.
+ *
+ * Alarms do not survive either, where WorkManager's queue did — so without this a phone restarted
+ * overnight has nothing booked until somebody opens Cirrus, which is the same silent stop the alarm
+ * clock was introduced to fix, arriving by a different route.
+ *
+ * A worker rather than work done in `BootReceiver` itself: this reads the agent store, and a
+ * broadcast receiver has about ten seconds and no business touching a database.
+ */
+@HiltWorker
+class ScheduleSyncWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted params: WorkerParameters,
+    private val scheduler: AgentScheduler,
+) : CoroutineWorker(context, params) {
+
+    override suspend fun doWork(): Result {
+        scheduler.syncAll()
+        return Result.success()
     }
 }

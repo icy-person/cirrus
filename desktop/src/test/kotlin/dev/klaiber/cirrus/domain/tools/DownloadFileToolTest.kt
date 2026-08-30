@@ -1,6 +1,9 @@
 package dev.klaiber.cirrus.domain.tools
 
+import dev.klaiber.cirrus.domain.tools.shell.Scratchpad
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
+import dev.klaiber.cirrus.domain.files.DownloadSink
+import dev.klaiber.cirrus.domain.files.SavedDownload
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -36,7 +39,25 @@ class DownloadFileToolTest {
     private lateinit var server: MockWebServer
     private lateinit var root: File
     private lateinit var workspace: ShellWorkspace
+    private lateinit var downloads: RecordingSink
     private lateinit var tool: DownloadFileTool
+
+    /**
+     * Stands in for the platform's Downloads folder, and records what reached it.
+     *
+     * A real sink is a MediaStore insert or a copy into `~/Downloads`, neither of which belongs in
+     * a unit test — but *whether the user's copy was made at all* is the whole of the bug this
+     * class is now here to prevent, so it is the thing asserted.
+     */
+    private class RecordingSink(var succeed: Boolean = true) : DownloadSink {
+        val saved = mutableListOf<String>()
+
+        override suspend fun save(source: File, displayName: String, mimeType: String?): SavedDownload? {
+            if (!succeed) return null
+            saved += displayName
+            return SavedDownload(name = displayName, location = "Downloads/$displayName")
+        }
+    }
 
     @Before
     fun setUp() {
@@ -44,7 +65,8 @@ class DownloadFileToolTest {
         server.start()
         root = Files.createTempDirectory("cirrus-download").toFile()
         workspace = ShellWorkspace(root)
-        tool = DownloadFileTool(OkHttpClient(), workspace)
+        downloads = RecordingSink()
+        tool = DownloadFileTool(OkHttpClient(), workspace, downloads)
     }
 
     @After
@@ -77,7 +99,7 @@ class DownloadFileToolTest {
         assertEquals("page.html", result.text("path"))
         assertEquals("text/html", result.text("content_type"))
 
-        val saved = File(workspace.topicDirectory("research-notes"), "page.html")
+        val saved = File(workspace.scratchpad(null).topicDirectory("research-notes"), "page.html")
         assertTrue("the file has to be on disk, not just in the reply", saved.exists())
         assertTrue(saved.readText().contains("<p>Hello</p>"))
         // The markup is the point: web_fetch would have flattened this away.
@@ -86,12 +108,12 @@ class DownloadFileToolTest {
 
     @Test
     fun `stops at the topic's cap rather than reading a whole large file into memory`() = runTest {
-        val oversized = "x".repeat((ShellWorkspace.MAX_TOPIC_BYTES + 50_000).toInt())
+        val oversized = "x".repeat((Scratchpad.MAX_TOPIC_BYTES + 50_000).toInt())
         server.enqueue(MockResponse.Builder().body(oversized).build())
 
         val result = run(*arrayOf("url" to server.url("/big.txt").toString()))
 
-        assertEquals(ShellWorkspace.MAX_TOPIC_BYTES, result["bytes"]!!.jsonPrimitive.long)
+        assertEquals(Scratchpad.MAX_TOPIC_BYTES, result["bytes"]!!.jsonPrimitive.long)
         assertTrue("truncation has to be said out loud", result.text("truncated") != null)
     }
 
@@ -103,8 +125,8 @@ class DownloadFileToolTest {
      */
     @Test
     fun `refuses when the topic is already over its budget`() = runTest {
-        File(workspace.topicDirectory("full"), "blob.bin")
-            .writeText("y".repeat((ShellWorkspace.MAX_TOPIC_BYTES + 1).toInt()))
+        File(workspace.scratchpad(null).topicDirectory("full"), "blob.bin")
+            .writeText("y".repeat((Scratchpad.MAX_TOPIC_BYTES + 1).toInt()))
         server.enqueue(MockResponse.Builder().body("never fetched").build())
 
         val result = run(*arrayOf("url" to server.url("/x.txt").toString(), "topic" to "full"))
@@ -135,6 +157,79 @@ class DownloadFileToolTest {
 
         assertTrue(result.text("error")!!.contains("http"))
         assertEquals(0, server.requestCount)
+    }
+
+    // ---- The user's copy -----------------------------------------------------------------------
+
+    /**
+     * The bug this tool shipped with, asserted.
+     *
+     * The first version saved only into the scratchpad, which is inside the app's private storage.
+     * "Downloaded to expenses/report.csv" was a true sentence about a file the person who asked
+     * could not open, and there was nothing in the reply to tell them so.
+     */
+    @Test
+    fun `the file also reaches the user's downloads, and the reply says so`() = runTest {
+        server.enqueue(MockResponse.Builder().body("a,b\n1,2").build())
+
+        val result = run("url" to server.url("/data.csv").toString())
+
+        assertEquals(listOf("data.csv"), downloads.saved)
+        assertEquals("Downloads/data.csv", result.text("saved_to"))
+        assertTrue(result.text("tell_the_user")!!.contains("Downloads"))
+    }
+
+    /** A working file the user never asked for should not land in their Downloads. */
+    @Test
+    fun `save=false keeps it to the working copy`() = runTest {
+        server.enqueue(MockResponse.Builder().body("<html></html>").build())
+
+        val result = run(
+            "url" to server.url("/page.html").toString(),
+            "save" to "false",
+        )
+
+        assertTrue(downloads.saved.isEmpty())
+        assertNull(result["saved_to"])
+        assertNull("nothing failed, so nothing to report", result["not_saved"])
+    }
+
+    /**
+     * A sink that could not write is reported rather than raised: the working copy succeeded, and
+     * what the model must not do is tell the user it was downloaded when it was not.
+     */
+    @Test
+    fun `a failed save is reported, and the download still succeeds`() = runTest {
+        downloads.succeed = false
+        server.enqueue(MockResponse.Builder().body("text").build())
+
+        val result = run("url" to server.url("/notes.txt").toString())
+
+        assertEquals("notes.txt", result.text("path"))
+        assertTrue(result.text("not_saved")!!.contains("Say that"))
+        assertNull(result["saved_to"])
+    }
+
+    /** The working copy goes to the conversation's own pad, not a shared one. */
+    @Test
+    fun `the working copy lands in the calling conversation's scratchpad`() = runTest {
+        server.enqueue(MockResponse.Builder().body("hello").build())
+
+        tool.execute(
+            buildJsonObject {
+                put("url", server.url("/x.txt").toString())
+                put("topic", "research")
+            },
+            TurnContext("thread-42"),
+        )
+
+        assertTrue(
+            File(workspace.scratchpad("thread-42").topicDirectory("research"), "x.txt").exists(),
+        )
+        assertFalse(
+            "another thread must not see it",
+            File(workspace.scratchpad("thread-7").topicDirectory("research"), "x.txt").exists(),
+        )
     }
 
     @Test

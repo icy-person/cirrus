@@ -14,6 +14,16 @@ import kotlinx.coroutines.flow.Flow
 interface ConversationDao {
 
     /**
+     * Every conversation id, including agent runs and archived threads.
+     *
+     * Used to decide which shell scratchpads still belong to something. Deliberately unfiltered:
+     * an archived thread is one you can still open, and a scratchpad deleted because its thread
+     * was archived would be a file lost to a filing decision.
+     */
+    @Query("SELECT id FROM conversations")
+    suspend fun allIds(): List<String>
+
+    /**
      * The drawer's list.
      *
      * `agentId IS NULL` is the whole of the separation between chats and scheduled runs: an agent

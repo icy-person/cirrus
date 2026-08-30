@@ -4,13 +4,17 @@ import dev.klaiber.cirrus.domain.tools.github.clip
 import dev.klaiber.cirrus.domain.tools.github.errorJson
 import dev.klaiber.cirrus.domain.tools.github.functionSchema
 import dev.klaiber.cirrus.domain.tools.github.string
+import dev.klaiber.cirrus.domain.files.DownloadSink
+import dev.klaiber.cirrus.domain.tools.github.booleanParam
 import dev.klaiber.cirrus.domain.tools.github.stringParam
+import dev.klaiber.cirrus.domain.tools.shell.Scratchpad
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
@@ -33,9 +37,18 @@ import java.net.URI
  * context window: `grep`, `wc`, `head` and `sed` are all right there, and the file can be looked at
  * three times without being fetched three times.
  *
- * Not a write. It reaches outside — hence the conversation's tools switch — but everything it
- * changes is a scratch file inside Cirrus that `clean_workspace` removes, which is the same test
- * that keeps memory off the write gate.
+ * It saves in two places, and that is the correction to the version that shipped first. That one
+ * saved only into the shell workspace, which is right for the model — the workspace is the only
+ * place `run_command` can read — and useless for the person who asked, because the workspace is
+ * inside the app's private storage. "Downloaded to expenses/report.csv" was a true sentence about a
+ * file they could not open, which is worse than a plain failure, since a failure would at least
+ * have been actionable. The working copy now goes to the scratchpad, a second copy goes to the
+ * user's own Downloads, and the reply names both.
+ *
+ * Not a write, by the definition the gate uses. Nothing it does is outside Cirrus in the sense that
+ * matters: a file in Downloads is one the user asked for, sitting where they asked for it, and
+ * removing it is something they can do without us. It reaches the network, so the conversation's
+ * tools switch governs it.
  *
  * The size cap is the interesting constraint, and it is deliberately the *topic's* cap rather than
  * a number of its own. A download is the easiest way there is to fill a disk, and a model that has
@@ -44,6 +57,7 @@ import java.net.URI
 class DownloadFileTool(
     private val client: OkHttpClient,
     private val workspace: ShellWorkspace,
+    private val downloads: DownloadSink,
 ) : CirrusTool {
 
     override val name: String = "download_file"
@@ -61,12 +75,15 @@ class DownloadFileTool(
             "`grep -c \"</tr>\" page.html`, `head -20 data.csv`, `wc -l log.txt`, " +
             "`cut -d, -f2 data.csv | sort | uniq -c`. The file is a normal file in that topic " +
             "until the topic is cleaned.\n\n" +
+            "THE USER GETS A COPY TOO. Unless you pass save=false, the file is also placed in " +
+            "their Downloads folder, where they can open it like any other download. Tell them " +
+            "the name it was saved under — the reply says what it is, and it may differ from the " +
+            "one you asked for if a file of that name was already there. The workspace copy is " +
+            "yours to work on and gets swept; theirs does not.\n\n" +
             "LIMITS. Only http and https. Files over " +
-            "${ShellWorkspace.MAX_TOPIC_BYTES / 1024}KB are truncated, because a topic holds no " +
+            "${Scratchpad.MAX_TOPIC_BYTES / 1024}KB are truncated, because a topic holds no " +
             "more than that in total — so this is for documents and data, not for archives, " +
-            "videos or installers, none of which anything here could open in any case. The file " +
-            "is scratch: it lives in Cirrus's own data folder and is swept when the topic goes " +
-            "idle. If they asked for something to keep, put it in your answer.",
+            "videos or installers, none of which anything here could open in any case.",
         required = listOf("url"),
     ) {
         stringParam("url", "Absolute http or https URL of the file to download.")
@@ -78,12 +95,23 @@ class DownloadFileTool(
         stringParam(
             "topic",
             "The job these files belong to, exactly as passed to run_command, so the command that " +
-                "reads this file can find it. Defaults to \"${ShellWorkspace.DEFAULT_TOPIC}\".",
+                "reads this file can find it. Defaults to \"${Scratchpad.DEFAULT_TOPIC}\".",
+        )
+        booleanParam(
+            "save",
+            "Whether to also put a copy in the user's Downloads. True by default, which is what " +
+                "you want whenever they asked for the file at all. Pass false only when the " +
+                "download is a step in your own work that they never asked for — a page you are " +
+                "about to count the rows of, say — so their Downloads folder does not fill with " +
+                "your working files.",
         )
     }
 
-    override suspend fun execute(arguments: JsonObject): String = try {
-        download(arguments)
+    override suspend fun execute(arguments: JsonObject): String =
+        execute(arguments, TurnContext.None)
+
+    override suspend fun execute(arguments: JsonObject, turn: TurnContext): String = try {
+        download(arguments, turn)
     } catch (cancellation: CancellationException) {
         // The user pressed stop. Swallowing this would report a half-written file as a result and
         // let the turn carry on as though nothing had happened.
@@ -92,7 +120,7 @@ class DownloadFileTool(
         errorJson(error.message ?: "The file could not be downloaded.")
     }
 
-    private suspend fun download(arguments: JsonObject): String {
+    private suspend fun download(arguments: JsonObject, turn: TurnContext): String {
         val raw = arguments.string("url")
             ?: return errorJson("missing required argument: url")
 
@@ -103,8 +131,11 @@ class DownloadFileTool(
                     "from here.",
             )
 
-        val topic = ShellWorkspace.topicName(arguments.string("topic"))
-        workspace.budgetProblem(topic)?.let { problem ->
+        // This conversation's scratchpad: the working copy has to land where this thread's
+        // run_command will look for it.
+        val pad = workspace.scratchpad(turn.conversationId)
+        val topic = Scratchpad.topicName(arguments.string("topic"))
+        pad.budgetProblem(topic)?.let { problem ->
             return buildJsonObject {
                 put("refused", true)
                 put("url", url)
@@ -113,24 +144,54 @@ class DownloadFileTool(
             }.toString()
         }
 
-        val directory = workspace.topicDirectory(topic)
+        val directory = pad.topicDirectory(topic)
         val filename = safeFileName(arguments.string("filename") ?: nameFrom(url))
         val destination = File(directory, filename)
 
         val outcome = withContext(Dispatchers.IO) { fetch(url, destination) }
         return when (outcome) {
             is Outcome.Failed -> errorJson(outcome.message)
-            is Outcome.Saved -> buildJsonObject {
+            is Outcome.Saved -> {
+                // Made after the download rather than instead of it: the scratchpad copy is what
+                // the shell can read, and this one is what the person who asked can open. A
+                // failure here is reported rather than raised — the file exists either way, and
+                // what matters is which of the two places it actually reached.
+                val wanted = arguments.boolean("save") ?: true
+                val kept = if (wanted) {
+                    downloads.save(destination, filename, outcome.contentType)
+                } else {
+                    null
+                }
+
+                buildJsonObject {
                 put("url", url)
                 if (outcome.finalUrl != url) put("redirected_to", outcome.finalUrl)
                 put("topic", topic)
                 put("path", filename)
                 put("content_type", outcome.contentType)
                 put("bytes", outcome.bytes)
+                when {
+                    kept != null -> {
+                        put("saved_to", kept.location)
+                        put(
+                            "saved_as", kept.name)
+                        put(
+                            "tell_the_user",
+                            "The file is in their Downloads as \"${kept.name}\". Say so — the " +
+                                "workspace copy is yours and gets swept, theirs does not.",
+                        )
+                    }
+
+                    wanted -> put(
+                        "not_saved",
+                        "The copy for the user could not be written, so only your working copy " +
+                            "exists. Say that rather than telling them it was downloaded.",
+                    )
+                }
                 if (outcome.truncated) {
                     put(
                         "truncated",
-                        "The file was larger than the ${ShellWorkspace.MAX_TOPIC_BYTES / 1024}KB " +
+                        "The file was larger than the ${Scratchpad.MAX_TOPIC_BYTES / 1024}KB " +
                             "a topic holds, so only the first part was saved. What is on disk is " +
                             "a prefix of the file, not the whole of it — say so if it matters.",
                     )
@@ -150,7 +211,8 @@ class DownloadFileTool(
                     "next",
                     "Read it with run_command in topic \"$topic\", for example: head -40 $filename",
                 )
-            }.toString()
+                }.toString()
+            }
         }
     }
 
@@ -185,7 +247,7 @@ class DownloadFileTool(
             }
 
             val body = result.body ?: return Outcome.Failed("$url returned an empty response.")
-            val limit = ShellWorkspace.MAX_TOPIC_BYTES
+            val limit = Scratchpad.MAX_TOPIC_BYTES
             var written = 0L
             var truncated = false
 
@@ -313,4 +375,20 @@ private fun nameFrom(url: String): String {
     if (last.isBlank()) return "download.html"
     // A segment with no extension is a route, not a file; `index.html` is the honest name for it.
     return if ('.' in last) last else "$last.html"
+}
+
+/**
+ * A boolean argument, tolerant of how models actually send one.
+ *
+ * `true`, `"true"`, `"yes"`, `1` all mean true; the mirror set means false. Anything else is null,
+ * which the caller reads as "not specified" rather than as false — the difference matters here,
+ * since the default is on and a misparsed value would silently stop saving the user's file.
+ */
+internal fun JsonObject.boolean(key: String): Boolean? {
+    val raw = (this[key] as? JsonPrimitive)?.content?.trim()?.lowercase() ?: return null
+    return when (raw) {
+        "true", "yes", "1" -> true
+        "false", "no", "0" -> false
+        else -> null
+    }
 }

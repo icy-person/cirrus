@@ -135,4 +135,34 @@ class AgentScheduleTest {
         val morning = LocalDateTime.of(2026, 8, 12, 4, 0)
         assertEquals(23.0, hours(ConsolidationScheduler.delayUntil(3, morning, zone)), 0.01)
     }
+
+    // ---- A run whose moment passed while the machine slept ---------------------------------------
+
+    /**
+     * The desktop's actual bug, at the one point it can be asserted.
+     *
+     * `delay` is measured on a monotonic clock that does not advance while a laptop is suspended,
+     * so an agent booked at 23:00 for 07:30 still believed it had eight hours to go when the lid
+     * opened. The wait is now against the wall clock, which means a run can arrive *late* and
+     * something has to decide whether late is too late.
+     */
+    @Test
+    fun `a run missed while asleep is taken if it is recent and dropped if it is not`() {
+        val due = 1_700_000_000_000L
+
+        assertTrue("on time", AgentScheduler.isStillWorthRunning(due, now = due))
+        assertTrue(
+            "a lid opened at 07:45 should still produce the 07:30 briefing",
+            AgentScheduler.isStillWorthRunning(due, now = due + 15 * 60 * 1000),
+        )
+        assertTrue(
+            "so should one opened after lunch",
+            AgentScheduler.isStillWorthRunning(due, now = due + 5 * 60 * 60 * 1000),
+        )
+        assertFalse(
+            "yesterday's briefing is not this morning's",
+            AgentScheduler.isStillWorthRunning(due, now = due + 24 * 60 * 60 * 1000),
+        )
+    }
+
 }

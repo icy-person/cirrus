@@ -38,6 +38,7 @@ import dev.klaiber.cirrus.domain.notify.DesktopNotifier
 import dev.klaiber.cirrus.domain.spotify.SpotifyRedirectListener
 import dev.klaiber.cirrus.domain.spotify.SpotifySession
 import dev.klaiber.cirrus.domain.tools.CirrusTool
+import dev.klaiber.cirrus.domain.files.DesktopDownloadSink
 import dev.klaiber.cirrus.domain.tools.DescribeSettingsTool
 import dev.klaiber.cirrus.domain.tools.DownloadFileTool
 import dev.klaiber.cirrus.domain.tools.DeviceToolSet
@@ -308,7 +309,10 @@ class AppContainer(
 
     private val webSearchTool = WebSearchTool(ollamaClient, settingsRepository)
     private val webFetchTool = WebFetchTool(ollamaClient)
-    private val downloadFileTool = DownloadFileTool(plainHttp, shellWorkspace)
+    /** Where a downloaded file goes so the user can open it: their own ~/Downloads. */
+    private val downloadSink = DesktopDownloadSink()
+
+    private val downloadFileTool = DownloadFileTool(plainHttp, shellWorkspace, downloadSink)
 
     private val gitHubToolSet = GitHubToolSet(
         listRepos = ListReposTool(gitHubClient),
@@ -479,6 +483,9 @@ class AppContainer(
         agentRepository.load()
         agentScheduler.syncAll()
         consolidationScheduler.sync()
-        shellWorkspace.clear()
+        // Housekeeping, not a wipe: only scratchpads whose conversation has been deleted, and
+        // any nobody has touched in a week. Clearing everything on start meant a conversation
+        // continued the next morning had lost the file it was working on.
+        shellWorkspace.prune(conversationRepository.allConversationIds())
     }
 }

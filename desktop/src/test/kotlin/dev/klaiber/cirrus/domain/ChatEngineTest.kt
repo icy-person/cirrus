@@ -52,6 +52,7 @@ import dev.klaiber.cirrus.data.repository.SkillRepository
 import dev.klaiber.cirrus.domain.tools.ListSkillsTool
 import dev.klaiber.cirrus.domain.tools.SkillToolSet
 import dev.klaiber.cirrus.domain.tools.UseSkillTool
+import dev.klaiber.cirrus.domain.files.DownloadSink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -152,6 +153,14 @@ class ChatEngineTest {
                         "cirrus-download-${System.nanoTime()}",
                     ),
                 ),
+                object : DownloadSink {
+                    // Nothing here downloads, so nothing is ever saved for a user who is not there.
+                    override suspend fun save(
+                        source: File,
+                        displayName: String,
+                        mimeType: String?,
+                    ) = null
+                },
             ),
             gitHubTools = GitHubToolSet(
                 listRepos = ListReposTool(gitHubClient),

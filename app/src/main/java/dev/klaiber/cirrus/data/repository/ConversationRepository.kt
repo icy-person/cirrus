@@ -39,6 +39,9 @@ class ConversationRepository @Inject constructor(
     fun observeMessages(conversationId: String): Flow<List<ChatMessage>> =
         messageDao.observeForConversation(conversationId).map { rows -> rows.map(mapper::toDomain) }
 
+    /** Every conversation that still exists, for the shell workspace's startup housekeeping. */
+    suspend fun allConversationIds(): Set<String> = conversationDao.allIds().toSet()
+
     suspend fun getConversation(id: String): Conversation? =
         conversationDao.getById(id)?.let(mapper::toDomain)
 

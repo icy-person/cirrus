@@ -22,31 +22,40 @@ class ShellWorkspaceTest {
     private lateinit var root: File
     private lateinit var workspace: ShellWorkspace
 
+    /**
+     * One conversation's pad. Everything the old flat workspace did is now a scratchpad's job, so
+     * the cases below are unchanged apart from what they are called on — which is itself the
+     * assertion that the split did not quietly change any of the rules.
+     */
+    private lateinit var pad: Scratchpad
+
     @Before
     fun setUp() {
         root = Files.createTempDirectory("cirrus-workspace").toFile()
         workspace = ShellWorkspace(root)
+        pad = workspace.scratchpad("conversation-one")
     }
 
     private fun write(topic: String, name: String, text: String = "x"): File =
-        File(workspace.topicDirectory(topic), name).apply { writeText(text) }
+        File(pad.topicDirectory(topic), name).apply { writeText(text) }
+
 
     @Test
     fun `a topic is its own directory`() {
         write("expenses", "totals.txt")
         write("log-counts", "counts.txt")
 
-        assertEquals(listOf("expenses", "log-counts"), workspace.topics().map { it.name }.sorted())
-        assertEquals(listOf("totals.txt"), workspace.topicEntries("expenses").map { it.path })
+        assertEquals(listOf("expenses", "log-counts"), pad.topics().map { it.name }.sorted())
+        assertEquals(listOf("totals.txt"), pad.topicEntries("expenses").map { it.path })
     }
 
     /** The point of normalising rather than rejecting: the model said something perfectly clear. */
     @Test
     fun `topic names are normalised into something safe`() {
-        assertEquals("invoice-totals-q3", ShellWorkspace.topicName("Invoice Totals (Q3)"))
-        assertEquals("scratch", ShellWorkspace.topicName(null))
-        assertEquals("scratch", ShellWorkspace.topicName("   "))
-        assertEquals("notes", ShellWorkspace.topicName("  notes  "))
+        assertEquals("invoice-totals-q3", Scratchpad.topicName("Invoice Totals (Q3)"))
+        assertEquals("scratch", Scratchpad.topicName(null))
+        assertEquals("scratch", Scratchpad.topicName("   "))
+        assertEquals("notes", Scratchpad.topicName("  notes  "))
     }
 
     /**
@@ -55,11 +64,10 @@ class ShellWorkspaceTest {
      */
     @Test
     fun `a topic name cannot climb out of the workspace`() {
-        val escape = ShellWorkspace.topicName("../../etc")
+        val escape = Scratchpad.topicName("../../etc")
 
         assertFalse(escape.contains('/'))
         assertFalse(escape.contains(".."))
-        assertEquals(root, workspace.topicDirectory("../../etc").parentFile)
     }
 
     @Test
@@ -68,9 +76,9 @@ class ShellWorkspaceTest {
         write("expenses", "raw.csv")
         write("notes", "todo.txt")
 
-        assertEquals(2, workspace.clear("expenses"))
-        assertEquals(listOf("notes"), workspace.topics().map { it.name })
-        assertEquals(1, workspace.entries().count { !it.isDirectory })
+        assertEquals(2, pad.clear("expenses"))
+        assertEquals(listOf("notes"), pad.topics().map { it.name })
+        assertEquals(1, pad.entries().count { !it.isDirectory })
     }
 
     @Test
@@ -78,8 +86,8 @@ class ShellWorkspaceTest {
         write("expenses", "totals.txt")
         write("notes", "todo.txt")
 
-        assertEquals(2, workspace.clear())
-        assertTrue(workspace.topics().isEmpty())
+        assertEquals(2, pad.clear())
+        assertTrue(pad.topics().isEmpty())
         assertTrue(workspace.directory().isDirectory)
     }
 
@@ -87,10 +95,10 @@ class ShellWorkspaceTest {
     fun `the sweep retires topics nothing has touched, and says which`() {
         val stale = write("old-job", "note.txt")
         write("current-job", "note.txt")
-        stale.setLastModified(System.currentTimeMillis() - 2 * ShellWorkspace.IDLE_MS)
+        stale.setLastModified(System.currentTimeMillis() - 2 * Scratchpad.IDLE_MS)
 
-        assertEquals(listOf("old-job"), workspace.sweep())
-        assertEquals(listOf("current-job"), workspace.topics().map { it.name })
+        assertEquals(listOf("old-job"), pad.sweep(force = true))
+        assertEquals(listOf("current-job"), pad.topics().map { it.name })
     }
 
     /**
@@ -101,23 +109,23 @@ class ShellWorkspaceTest {
     fun `the sweep caps how many live topics there can be`() {
         // All well inside the idle window, so only the cap can be what removes any of them.
         val now = System.currentTimeMillis()
-        val count = ShellWorkspace.MAX_TOPICS + 3
+        val count = Scratchpad.MAX_TOPICS + 3
         repeat(count) { index ->
             write("job-$index", "note.txt").setLastModified(now - (count - index) * 1_000L)
         }
 
-        val removed = workspace.sweep()
+        val removed = pad.sweep(force = true)
 
         assertEquals(listOf("job-0", "job-1", "job-2"), removed)
-        assertEquals(ShellWorkspace.MAX_TOPICS, workspace.topics().size)
+        assertEquals(Scratchpad.MAX_TOPICS, pad.topics().size)
     }
 
     @Test
     fun `an untouched workspace sweeps to nothing`() {
         write("current-job", "note.txt")
 
-        assertTrue(workspace.sweep().isEmpty())
-        assertEquals(1, workspace.topics().size)
+        assertTrue(pad.sweep(force = true).isEmpty())
+        assertEquals(1, pad.topics().size)
     }
 
     /**
@@ -132,9 +140,9 @@ class ShellWorkspaceTest {
     fun `a topic over its byte budget refuses the next command and says which tool fixes it`() {
         write("build", "page.html", "x".repeat(3_000))
 
-        assertNull("well under the cap", workspace.budgetProblem("build", maxBytes = 10_000))
+        assertNull("well under the cap", pad.budgetProblem("build", maxBytes = 10_000))
 
-        val problem = workspace.budgetProblem("build", maxBytes = 2_000)
+        val problem = pad.budgetProblem("build", maxBytes = 2_000)
         assertNotNull(problem)
         assertTrue("it has to name the topic", "build" in problem!!)
         assertTrue("and the way out", "clean_workspace" in problem)
@@ -145,14 +153,107 @@ class ShellWorkspaceTest {
     fun `a topic over its file budget is caught even while it is small`() {
         repeat(6) { write("split", "part-$it.txt") }
 
-        assertNull(workspace.budgetProblem("split", maxFiles = 10))
-        assertNotNull(workspace.budgetProblem("split", maxFiles = 3))
+        assertNull(pad.budgetProblem("split", maxFiles = 10))
+        assertNotNull(pad.budgetProblem("split", maxFiles = 3))
     }
 
     @Test
     fun `an unused topic has no budget problem`() {
-        assertNull(workspace.budgetProblem("never-used"))
-        assertNull(workspace.budgetProblem(null))
+        assertNull(pad.budgetProblem("never-used"))
+        assertNull(pad.budgetProblem(null))
+    }
+
+    // ---- One scratchpad per conversation -------------------------------------------------------
+
+    /**
+     * The bug the split exists for.
+     *
+     * Two threads both working in a topic called "notes" used to share one directory, so one
+     * thread's files appeared in the other's listing and `clean_workspace` in either took both.
+     * Nothing about that reads as a design decision from the transcript; it reads as the app losing
+     * work.
+     */
+    @Test
+    fun `two conversations working in the same topic do not see each other`() {
+        val first = workspace.scratchpad("thread-one")
+        val second = workspace.scratchpad("thread-two")
+
+        File(first.topicDirectory("notes"), "mine.txt").writeText("first")
+        File(second.topicDirectory("notes"), "theirs.txt").writeText("second")
+
+        assertEquals(listOf("mine.txt"), first.topicEntries("notes").map { it.path })
+        assertEquals(listOf("theirs.txt"), second.topicEntries("notes").map { it.path })
+
+        // And clearing one leaves the other entirely alone.
+        first.clear("notes")
+        assertEquals(1, second.topicEntries("notes").size)
+    }
+
+    @Test
+    fun `a topic cannot climb out of its own scratchpad`() {
+        val pad = workspace.scratchpad("thread-one")
+        val directory = pad.topicDirectory("../../etc")
+
+        assertEquals(File(root, "c-thread-one"), directory.parentFile)
+    }
+
+    /** A call with no conversation behind it still works, rather than failing. */
+    @Test
+    fun `no conversation gets the shared pad`() {
+        val shared = workspace.scratchpad(null)
+        File(shared.topicDirectory("scratch"), "x.txt").writeText("x")
+
+        assertEquals(1, shared.topicEntries("scratch").size)
+        assertTrue(File(root, ShellWorkspace.SHARED_SCOPE).isDirectory)
+    }
+
+    // ---- Housekeeping runs between jobs, not during them ----------------------------------------
+
+    /**
+     * The sweep used to run before every single command, which is how files disappeared between
+     * one step of a job and the next. Now a second call inside the window does nothing at all.
+     */
+    @Test
+    fun `a sweep does not run again straight away`() {
+        val thread = workspace.scratchpad("thread-one")
+        val old = File(thread.topicDirectory("old-job"), "notes.txt").apply { writeText("x") }
+        old.setLastModified(1_000L)
+
+        assertEquals(listOf("old-job"), thread.sweep())
+
+        // A second job's worth of commands, all inside the interval: nothing more may be taken,
+        // however idle it looks. This is the whole of the fix — the old code swept here too.
+        val second = File(thread.topicDirectory("second-job"), "data.txt").apply { writeText("x") }
+        second.setLastModified(1_000L)
+
+        assertTrue("the interval has not elapsed", thread.sweep().isEmpty())
+        assertTrue(second.exists())
+    }
+
+    /**
+     * Startup housekeeping replaced wiping everything, which lost the file you came back for.
+     */
+    @Test
+    fun `pruning drops orphans and stale pads, and keeps what is still live`() {
+        val live = workspace.scratchpad("still-here")
+        val orphan = workspace.scratchpad("deleted-thread")
+        File(live.topicDirectory("job"), "a.txt").writeText("a")
+        File(orphan.topicDirectory("job"), "b.txt").writeText("b")
+
+        val removed = workspace.prune(liveConversationIds = setOf("still-here"))
+
+        assertEquals(listOf("c-deleted-thread"), removed)
+        assertTrue(File(live.topicDirectory("job"), "a.txt").exists())
+    }
+
+    /** An empty set means "not loaded yet", not "the user deleted everything". */
+    @Test
+    fun `pruning with nothing known deletes nothing that is recent`() {
+        val pad = workspace.scratchpad("thread-one")
+        File(pad.topicDirectory("job"), "a.txt").writeText("a")
+
+        assertTrue(workspace.prune(liveConversationIds = emptySet()).isEmpty())
+        assertTrue(File(pad.topicDirectory("job"), "a.txt").exists())
     }
 
     /** Oldest first, so the file the last command wrote is not deleted to make room for itself. */

@@ -15,6 +15,7 @@ import androidx.core.content.getSystemService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.klaiber.cirrus.BuildConfig
 import dev.klaiber.cirrus.domain.tools.CirrusTool
+import dev.klaiber.cirrus.domain.tools.TurnContext
 import dev.klaiber.cirrus.domain.tools.github.errorJson
 import dev.klaiber.cirrus.domain.tools.github.functionSchema
 import dev.klaiber.cirrus.domain.tools.github.int
@@ -226,7 +227,10 @@ class SystemInfoTool @Inject constructor(
             "session, to see what is available.",
     ) {}
 
-    override suspend fun execute(arguments: JsonObject): String = shellTool {
+    override suspend fun execute(arguments: JsonObject): String =
+        execute(arguments, TurnContext.None)
+
+    override suspend fun execute(arguments: JsonObject, turn: TurnContext): String = shellTool {
         buildJsonObject {
             putJsonObject("device") {
                 put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -264,9 +268,11 @@ class SystemInfoTool @Inject constructor(
                 put("version", BuildConfig.VERSION_NAME)
                 put("workspace_files", workspace.entries().count { !it.isDirectory })
                 put("workspace_bytes", workspace.usedBytes())
-                // Which jobs already have scratch files, so a model resuming a conversation can
-                // reuse a topic rather than opening a second one for work it already started.
-                val topics = workspace.topics()
+                // Which jobs already have scratch files *in this conversation*, so a model
+                // resuming one can reuse a topic rather than opening a second for work it already
+                // started. Another thread's topics are deliberately not listed: they are not
+                // reachable from here, and naming them would only invite a command that fails.
+                val topics = workspace.scratchpad(turn.conversationId).topics()
                 if (topics.isNotEmpty()) {
                     put(
                         "workspace_topics",

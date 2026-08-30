@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Keeps the CPU running between packets while the screen is off. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Alarms are lost on reboot, where WorkManager's queue was not. Without this, a phone
+         restarted overnight has no agents booked at all until somebody opens Cirrus. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Dictation in the composer. Requested at the moment the microphone is first tapped. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
@@ -108,6 +111,31 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+
+        <!-- The clock agents run on. An alarm rather than deferred work because Doze holds
+             deferred work for hours, and a phone left alone overnight is in Doze at exactly the
+             time a morning agent is due. The receiver only enqueues; the run itself is a worker. -->
+        <receiver
+            android:name=".domain.agents.AgentAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.klaiber.cirrus.RUN_AGENT" />
+                <data android:scheme="cirrus-agent" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Puts those alarms back after a restart or an update, since neither preserves them.
+             Exported, and it has to be: BOOT_COMPLETED is an implicit system broadcast, and a
+             receiver that is not exported simply never hears it. Nothing else can reach it —
+             the two actions are the system's to send. -->
+        <receiver
+            android:name=".domain.agents.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Runs only while a turn is in flight and stops itself as soon as one is not. -->
         <service

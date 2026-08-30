@@ -16,6 +16,7 @@ import dev.klaiber.cirrus.domain.model.Role
 import dev.klaiber.cirrus.domain.model.ThinkMode
 import dev.klaiber.cirrus.domain.model.ToolInvocation
 import dev.klaiber.cirrus.domain.tools.ToolRegistry
+import dev.klaiber.cirrus.domain.tools.TurnContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -142,7 +143,14 @@ class ChatEngine @Inject constructor(
                         durationMs = 0L,
                     )
                 } else {
-                    runCatching { tool.execute(call.function.arguments) }.fold(
+                    runCatching {
+                        // The conversation goes with the call: the shell's scratch
+                        // files are scoped to the thread that made them.
+                        tool.execute(
+                            call.function.arguments,
+                            TurnContext(conversation.id),
+                        )
+                    }.fold(
                         onSuccess = { result ->
                             invocation.copy(
                                 resultJson = result,

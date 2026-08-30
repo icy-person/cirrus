@@ -150,7 +150,11 @@ class CommandPolicyTest {
 
     @Test
     fun `refuses a command longer than the limit`() {
-        refused("echo " + "a".repeat(600))
+        // The cap is 1,200 now, not 500: a `sed` with three substitutions and a filename is three
+        // hundred characters before anything unusual has happened, and the old limit was what
+        // stood between the shell and any real editing.
+        allowed("echo " + "a".repeat(600))
+        refused("echo " + "a".repeat(1_300))
     }
 
     // ---- The narrow argument rules ------------------------------------------------------------

@@ -1,6 +1,7 @@
 package dev.klaiber.cirrus.domain.tools.shell
 
 import dev.klaiber.cirrus.domain.tools.CirrusTool
+import dev.klaiber.cirrus.domain.tools.TurnContext
 import dev.klaiber.cirrus.domain.tools.github.errorJson
 import dev.klaiber.cirrus.domain.tools.github.functionSchema
 import dev.klaiber.cirrus.domain.tools.github.int
@@ -70,6 +71,14 @@ class RunCommandTool(
             "tell them otherwise.\n\n" +
             "PROGRAMS. " + CommandPolicy.summary() + " Pipes, &&, ||, ; and redirection into the " +
             "topic all work.\n\n" +
+            "EDITING A FILE. You can change a file you have written, in place: " +
+            "`sed -i 's/old/new/g' notes.txt` for a substitution, `sed -i '3d' notes.txt` to drop " +
+            "a line, `sed -i '2i\\new line' notes.txt` to insert one. For anything larger, read " +
+            "and rewrite: `sed 's/a/b/' notes.txt > tidied.txt && mv tidied.txt notes.txt` — the " +
+            "redirect has to be to a different name, since a shell truncates the target before " +
+            "the command reads it. `fmt`, `column`, `expand` and `tr` reshape text, `split` cuts " +
+            "a long file into pieces, and `tee -a` appends. Check with `cat` or `head` before and " +
+            "after: an edit you did not verify is an edit you cannot report.\n\n" +
             "BE NON-DESTRUCTIVE. Read before you write, and never delete or overwrite a file you " +
             "did not create yourself in this conversation. Nothing outside the workspace can be " +
             "harmed, which means a destructive command is never necessary here — it is only ever " +
@@ -83,8 +92,8 @@ class RunCommandTool(
             "python, make, gradle, docker and everything like them are refused by name. Do not " +
             "scaffold a project, build a site, compile anything or start a server: it will not " +
             "work, and the turns spent finding that out are the user's. A topic holds " +
-            "${ShellWorkspace.MAX_TOPIC_BYTES / 1024}KB and " +
-            "${ShellWorkspace.MAX_TOPIC_FILES} files before the next command in it is refused. " +
+            "${Scratchpad.MAX_TOPIC_BYTES / 1024}KB and " +
+            "${Scratchpad.MAX_TOPIC_FILES} files before the next command in it is refused. " +
             "When the user asks for a web page, a script, a config file or a document, the answer " +
             "is its contents, written into your reply where they can read and copy it — not a " +
             "file in a scratch directory they cannot browse to.\n\n" +
@@ -107,7 +116,7 @@ class RunCommandTool(
         stringParam(
             "topic",
             "A short name for the job these files belong to, such as \"expenses\". Reuse the same " +
-                "topic for every command of one job. Defaults to \"${ShellWorkspace.DEFAULT_TOPIC}\".",
+                "topic for every command of one job. Defaults to \"${Scratchpad.DEFAULT_TOPIC}\".",
         )
         intParam(
             "timeout_seconds",
@@ -115,11 +124,18 @@ class RunCommandTool(
         )
     }
 
-    override suspend fun execute(arguments: JsonObject): String = shellTool {
+    override suspend fun execute(arguments: JsonObject): String =
+        execute(arguments, TurnContext.None)
+
+    override suspend fun execute(arguments: JsonObject, turn: TurnContext): String = shellTool {
         val command = arguments.string("command")
             ?: return@shellTool errorJson("missing required argument: command")
 
-        val topic = ShellWorkspace.topicName(arguments.string("topic"))
+        // The conversation's own scratchpad. Two threads working in a topic called "notes" now
+        // have two directories called "notes", which is what stops one of them finding the
+        // other's files and what stops `clean_workspace` in either taking both.
+        val pad = workspace.scratchpad(turn.conversationId)
+        val topic = Scratchpad.topicName(arguments.string("topic"))
 
         when (val verdict = CommandPolicy.check(command)) {
             is CommandVerdict.Refused -> buildJsonObject {
@@ -129,19 +145,19 @@ class RunCommandTool(
             }.toString()
 
             is CommandVerdict.Allowed -> {
-                // Inside this branch, and before the command rather than after it. Before, because
-                // the point is that the command starts against a tidy workspace and a sweep run
-                // afterwards would report a state nobody asked about. Inside, because a sweep has
-                // to be announced in the same reply it happened in — and a refusal has no room to
-                // say so, which would leave files quietly gone with nothing in the transcript to
-                // explain it. A command that never ran is also no reason to tidy up after one.
-                val swept = workspace.sweep()
+                // Rate-limited inside [Scratchpad.sweep], so in practice this does nothing at
+                // all for most commands — which is the point. It used to run before every one,
+                // and a topic crossing the idle line between two steps of a job disappeared
+                // underneath the model mid-task. It is still called from here rather than from a
+                // timer because a sweep has to be *announced* in the reply it happened in: files
+                // that quietly stopped existing are a puzzle the model spends a turn on.
+                val swept = pad.sweep()
 
                 // After the sweep, because the sweep may just have made the room. A budget that
                 // has run out is reported as a refusal rather than an error: the command was
                 // well-formed and would have run, and what the model needs to hear is which topic
                 // is full and which tool empties it, not that something went wrong.
-                val overBudget = workspace.budgetProblem(topic)
+                val overBudget = pad.budgetProblem(topic)
                 if (overBudget != null) {
                     return@shellTool buildJsonObject {
                         put("refused", true)
@@ -167,7 +183,7 @@ class RunCommandTool(
                 val result = runner.run(
                     command = command,
                     timeoutMs = timeout,
-                    directory = workspace.topicDirectory(topic),
+                    directory = pad.topicDirectory(topic),
                     input = input,
                 )
 
@@ -210,7 +226,7 @@ class RunCommandTool(
                         )
                     }
                     put("duration_ms", result.durationMs)
-                    putTopicFiles(workspace, topic)
+                    putTopicFiles(pad, topic)
                     putSweptTopics(swept)
                 }.toString()
             }
@@ -249,10 +265,15 @@ class CleanWorkspaceTool(
         )
     }
 
-    override suspend fun execute(arguments: JsonObject): String = shellTool {
+    override suspend fun execute(arguments: JsonObject): String =
+        execute(arguments, TurnContext.None)
+
+    override suspend fun execute(arguments: JsonObject, turn: TurnContext): String = shellTool {
+        val pad = workspace.scratchpad(turn.conversationId)
         val requested = arguments.string("topic")?.takeIf { it.isNotBlank() }
-        val topic = requested?.let { ShellWorkspace.topicName(it) }
-        val removed = workspace.clear(topic)
+        val topic = requested?.let { Scratchpad.topicName(it) }
+        // Only this conversation's files. Omitting the topic used to clear every thread's work.
+        val removed = pad.clear(topic)
 
         buildJsonObject {
             topic?.let { put("topic", it) }
@@ -266,7 +287,7 @@ class CleanWorkspaceTool(
                     else -> "The workspace was already empty."
                 },
             )
-            val left = workspace.topics().filter { it.fileCount > 0 }
+            val left = pad.topics().filter { it.fileCount > 0 }
             if (left.isNotEmpty()) {
                 putJsonArray("topics_still_holding_files") {
                     left.forEach { add(JsonPrimitive(it.name)) }
@@ -284,8 +305,8 @@ class CleanWorkspaceTool(
  * reported separately: a model told "14 files" and shown ten knows to look, where a model shown ten
  * and told nothing believes it has seen them all.
  */
-private fun JsonObjectBuilder.putTopicFiles(workspace: ShellWorkspace, topic: String) {
-    val entries = workspace.topicEntries(topic).filter { !it.isDirectory }
+private fun JsonObjectBuilder.putTopicFiles(pad: Scratchpad, topic: String) {
+    val entries = pad.topicEntries(topic).filter { !it.isDirectory }
     put("file_count", entries.size)
     if (entries.isEmpty()) return
 
@@ -294,10 +315,10 @@ private fun JsonObjectBuilder.putTopicFiles(workspace: ShellWorkspace, topic: St
     // budget, and it starts writing smaller files before anything has to refuse it.
     val bytes = entries.sumOf { it.sizeBytes }
     put("topic_bytes", bytes)
-    if (bytes > ShellWorkspace.MAX_TOPIC_BYTES / 2) {
+    if (bytes > Scratchpad.MAX_TOPIC_BYTES / 2) {
         put(
             "topic_nearly_full",
-            "This topic is over half of its ${ShellWorkspace.MAX_TOPIC_BYTES / 1024}KB limit. " +
+            "This topic is over half of its ${Scratchpad.MAX_TOPIC_BYTES / 1024}KB limit. " +
                 "Past that, the next command here is refused. Finish the job and call " +
                 "clean_workspace, or work in a different topic.",
         )

@@ -73,6 +73,13 @@ internal fun JsonObjectBuilder.intParam(name: String, description: String) {
     }
 }
 
+internal fun JsonObjectBuilder.booleanParam(name: String, description: String) {
+    putJsonObject(name) {
+        put("type", "boolean")
+        put("description", description)
+    }
+}
+
 internal fun JsonObjectBuilder.enumParam(
     name: String,
     description: String,

@@ -157,7 +157,16 @@ app/src/main/java/dev/klaiber/cirrus/
   rather than another megabyte. Two caps because they catch different mistakes: bytes catch the
   model writing a website into a scratch directory, the file count catches `part-001.txt` through
   `part-400.txt`, which stays under any byte cap while making the topic listing useless.
-- **Topics** — the workspace is divided by job, and every command runs inside one. A single flat
+- **`ShellWorkspace` / `Scratchpad`** — the workspace is divided by *conversation*, and each
+  conversation's `Scratchpad` is divided by job. A flat workspace shared by every thread was wrong
+  twice over, and both failures read from the transcript as the app losing your work: two threads
+  using a topic called `notes` wrote into one directory, so `clean_workspace` in either took both;
+  and one shared topic cap meant a busy conversation swept the topics of a thread the user was
+  still in the middle of. Scoping to the thread fixes both with no new rules — a scratchpad's
+  lifetime is its conversation's, its budget is its own, and cleaning one cannot reach another.
+  `TurnContext` is how a tool learns which conversation it is in; see below for why it is an
+  argument rather than a field.
+- **Topics** — a scratchpad is divided by job, and every command runs inside one. A single flat
   scratch directory across a long session becomes `out.txt`, `out2.txt`, `tmp.txt`, and the model
   starts reading the wrong one; a topic also *isolates*, since `..` is refused and one job therefore
   cannot reach another's files. Names are normalised rather than rejected (`Invoice Totals (Q3)` →
@@ -167,6 +176,15 @@ app/src/main/java/dev/klaiber/cirrus/
   start, `sweep` before every command (idle topics, and a cap on how many can be live), and
   `clean_workspace` for the model to call when a job is actually over. A sweep says what it took, so
   a missing file is a sentence rather than a puzzle.
+- **Cleanup runs between jobs, not during them.** `sweep` used to run before *every* command with a
+  forty-five-minute idle window, which meant a topic crossing that line between two steps of one job
+  vanished underneath the model — it wrote `totals.csv`, thought for two commands, and found it
+  gone. It is now rate-limited to `SWEEP_INTERVAL_MS` (stamped on a marker file, so a process
+  restart does not reset it) with a day's idle window, so no realistic job spans a sweep at all. And
+  the process-start `clear()` is now `prune()`: what goes is scratchpads whose conversation has been
+  deleted, plus anything untouched for a week. Wiping everything on start meant a conversation
+  picked up the next morning had lost the file it was working on. An empty live-id set means "not
+  loaded yet", never "the user deleted everything".
 - **`SuggestionGenerator`** — asks the configured model for the four openers on an empty chat and
   for agent ideas, telling it exactly which tools this install has so nothing is suggested that
   would fail on the first tap. Generated once per process per capability signature. The static
@@ -258,7 +276,14 @@ app/src/main/java/dev/klaiber/cirrus/
   checkout, so the instructions arrive with a sentence saying to take the method and ignore
   everything that assumes a development machine — attached to the instructions, because a rule in
   the system prompt is read before the skill and forgotten by the time it contradicts one.
-- **`DownloadFileTool`** — fetches a URL's actual bytes into the shell workspace. `web_fetch`
+- **`DownloadSink`** — where a downloaded file goes so the *user* can open it: MediaStore's
+  Downloads collection on Android (no permission on API 29+, and the file outlives an uninstall),
+  `~/Downloads` on the desktop. It exists because the first `download_file` did not have it and
+  saved only into the private scratch workspace — "downloaded to expenses/report.csv" was a true
+  sentence about a file nobody could open, which is worse than a failure because a failure would
+  have been actionable.
+- **`DownloadFileTool`** — fetches a URL's actual bytes into the shell workspace *and* the user's
+  Downloads. `web_fetch`
   flattens a page to prose, which is right for "what does this article say" and wrong for
   everything else: the markup is gone, so is the CSV's comma structure, so is the JSON. This saves
   the file into the topic the model is already working in, so `grep`, `wc` and `head` are right
@@ -426,6 +451,20 @@ to the memory brief. A tool description is read when the model is deciding wheth
 tool*; "clean up before you finish" is about the end of a session, which is exactly the moment
 nobody is reading a tool description. Two sentences, because this is paid for on every turn.
 
+### How a tool learns which conversation it is in
+
+`CirrusTool.execute` has a second overload taking a `TurnContext`, and `ChatEngine` calls that one.
+Almost nothing needs it; the shell does, because scratch files are scoped to the thread that made
+them. It is an *argument* rather than a field set before the call, and that is load-bearing:
+`SendNotificationTool` does keep a volatile `conversationId`, and gets away with it only because one
+agent runs at a time. Chats have no such property — `TurnController` runs a turn per conversation on
+the application scope, several at once — so a shared "current conversation" would hand one thread's
+files to another the moment two replies overlapped.
+
+An overload with a default body, rather than a parameter on the existing method, because the context
+matters to three tools out of three dozen. Override `execute(arguments, turn)` when the turn
+matters; everything else overrides `execute(arguments)` and never sees it.
+
 ### Writing a tool
 
 Implement `CirrusTool`, register it in `ToolRegistry` (via `GitHubToolSet` for GitHub ones), and:
@@ -530,11 +569,17 @@ width from its label. Note the modifier order in `Modifier.readingMeasure`:
 `fillMaxWidth().widthIn(max)` does nothing at all, because `fillMaxWidth` hands its child a fixed
 width and `widthIn` may only raise a maximum to meet a minimum, never lower it below one.
 
-**No WorkManager.** `AgentScheduler` and `ConsolidationScheduler` are coroutines that sleep until
-due, run, and book the next occurrence — the same shape as the one-shot-that-re-books-itself they
+**No WorkManager, and no `delay` against a duration.** `AgentScheduler` and `ConsolidationScheduler`
+are coroutines that sleep until due, run, and book the next occurrence — the same shape as the one-shot-that-re-books-itself they
 replace, and for the same reason: periodic work drifts against the wall clock and "07:30 on
 weekdays" is the whole feature. The re-booking sits in a `finally` so one bad morning cannot
-unschedule an agent. **The behavioural difference that cannot be avoided: agents only run while
+unschedule an agent. The wait itself is against the **wall clock**, sliced into minutes, and that is
+not a detail: `delay` is measured on a monotonic clock that does not advance while a laptop is
+suspended, so an agent booked at 23:00 for 07:30 still believed it had eight hours to go when the
+lid opened — every desktop agent scheduled overnight, which is most of them, went off some time that
+afternoon. A run whose moment passed while the machine slept is taken if it is under six hours late
+and skipped if it is not (`isStillWorthRunning`, which is the one part of that path a test can
+reach). **The behavioural difference that cannot be avoided: agents only run while
 Cirrus is open.** WorkManager persists its queue, so a sleeping phone fires a missed 07:30 late; a
 desktop app that was not running missed it, and the next occurrence is booked instead. Firing a
 fortnight of stale briefings at launch would be worse than skipping them.
@@ -597,6 +642,17 @@ The test suite came across with the code: 457 tests across 40 classes, run with 
   `MIGRATION_2_3`. Column types must match what Room generates exactly or the identity hash check
   fails at open, and every schema change needs a regenerated `app/schemas/*.json` — that file is
   written by a build, so run one after changing an entity.
+- **Agents fire from an alarm, not from deferred work.** `AgentAlarms` sets an
+  `AlarmManager` alarm at the due time; `AgentAlarmReceiver` enqueues `AgentWorker`; the worker runs
+  the generation and books the next alarm. WorkManager was the clock and is a bad one — it defers
+  under Doze, and a phone left alone overnight is in Doze at exactly 07:30, so the case the feature
+  exists for was the one most likely to be held for hours. It stays the *runner*, for the retry
+  chain and the Hilt factory. `setAndAllowWhileIdle` unless the platform already permits the exact
+  variant, because `SCHEDULE_EXACT_ALARM` is a permission this app will not ask for. Alarms do not
+  survive a reboot, where WorkManager's queue did, so `BootReceiver` puts them back through
+  `ScheduleSyncWorker`. This also removed a second bug: `schedule` used to enqueue delayed work
+  under the same unique name the worker was running as, with `REPLACE`, so the worker cancelled
+  itself while re-booking.
 - **Only one agent runs at a time**, and that is load-bearing rather than tidy: `SendNotificationTool`
   is a singleton carrying the conversation its notification should open, so two overlapping runs
   hand each other's threads to each other's notifications. Agents fire on the minute, and "08:00 on

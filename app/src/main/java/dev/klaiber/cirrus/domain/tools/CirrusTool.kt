@@ -32,6 +32,27 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * Which turn a tool call belongs to.
+ *
+ * Almost no tool cares. The shell does, because its scratch files are scoped to the conversation
+ * that made them, and it is the only way for a tool to know which one that is.
+ *
+ * It arrives as an argument rather than being set on the tool beforehand, and that is the whole
+ * design. `SendNotificationTool` does keep a volatile field for the conversation an agent's
+ * notification should open, and it gets away with it only because one agent runs at a time — a
+ * property `AgentRunner` has to hold on purpose. Chats have no such property: `TurnController` runs
+ * a turn per conversation on the application scope, several at once, so a shared "current
+ * conversation" field would hand one thread's files to another the moment two people replied in
+ * quick succession.
+ */
+data class TurnContext(val conversationId: String?) {
+    companion object {
+        /** A call from outside a turn — a test, or a tool driven directly. */
+        val None = TurnContext(conversationId = null)
+    }
+}
+
+/**
  * A function the model may call during a turn.
  *
  * Implementations return a JSON string that is fed back as a `role: "tool"` message, so the
@@ -60,6 +81,16 @@ interface CirrusTool {
     val writes: Boolean get() = false
 
     suspend fun execute(arguments: JsonObject): String
+
+    /**
+     * The entry point the engine uses, carrying which turn this call belongs to.
+     *
+     * An overload with a default body rather than a parameter on [execute], because the context
+     * matters to two tools out of three dozen and making the other thirty-four declare a parameter
+     * they ignore would be noise in every one of them. Override this instead of [execute] when the
+     * turn matters; the default drops it.
+     */
+    suspend fun execute(arguments: JsonObject, turn: TurnContext): String = execute(arguments)
 }
 
 /** Grounds answers in current sources via Ollama's hosted search index. */

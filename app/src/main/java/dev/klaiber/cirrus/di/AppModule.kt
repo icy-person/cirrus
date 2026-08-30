@@ -33,6 +33,8 @@ import dev.klaiber.cirrus.domain.tools.shell.RunCommandTool
 import dev.klaiber.cirrus.domain.tools.shell.ShellRunner
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import dev.klaiber.cirrus.domain.tools.shell.SystemInfoTool
+import dev.klaiber.cirrus.domain.files.AndroidDownloadSink
+import dev.klaiber.cirrus.domain.files.DownloadSink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -76,6 +78,13 @@ object AppModule {
     @Provides
     @Singleton
     fun provideShellRunner(workspace: ShellWorkspace): ShellRunner = ShellRunner(workspace)
+
+    /**
+     * Where a downloaded file goes so the user can open it: the device's Downloads, via MediaStore.
+     */
+    @Provides
+    @Singleton
+    fun provideDownloadSink(sink: AndroidDownloadSink): DownloadSink = sink
 
     /**
      * The skill chooser, assembled by hand because the set carries the repository as well as the

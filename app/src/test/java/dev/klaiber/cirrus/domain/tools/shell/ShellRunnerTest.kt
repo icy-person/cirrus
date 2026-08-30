@@ -166,12 +166,12 @@ class ShellRunnerTest {
 
     @Test
     fun `a command runs in the topic it was given`() = runBlocking {
-        val topic = workspace.topicDirectory("expenses")
+        val topic = workspace.scratchpad(null).topicDirectory("expenses")
 
         runner.run("echo written > note.txt", directory = topic)
 
         assertTrue(File(topic, "note.txt").exists())
-        assertEquals(listOf("note.txt"), workspace.topicEntries("expenses").map { it.path })
+        assertEquals(listOf("note.txt"), workspace.scratchpad(null).topicEntries("expenses").map { it.path })
     }
 
     /** Android's `date` answers in UTC unless TZ is set, which would be a quietly wrong clock. */

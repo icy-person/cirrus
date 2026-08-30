@@ -9,6 +9,7 @@ import dev.klaiber.cirrus.domain.agents.AgentScheduler
 import dev.klaiber.cirrus.domain.memory.ConsolidationScheduler
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import dev.klaiber.cirrus.service.GenerationService
+import dev.klaiber.cirrus.data.repository.ConversationRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +30,7 @@ class CirrusApp : Application(), Configuration.Provider {
     @Inject lateinit var consolidationScheduler: ConsolidationScheduler
 
     @Inject lateinit var shellWorkspace: ShellWorkspace
+    @Inject lateinit var conversationRepository: ConversationRepository
 
     /**
      * Workers are constructed by Hilt, not by WorkManager's default factory.
@@ -65,9 +67,13 @@ class CirrusApp : Application(), Configuration.Provider {
             consolidationScheduler.sync()
         }
 
-        // The shell is told to clean up after itself, and mostly does. This is the backstop for the
-        // times it does not: a session starts with an empty workspace whatever the last one left
-        // behind, so scratch files can never accumulate across runs of the app.
-        scope.launch(Dispatchers.IO) { shellWorkspace.clear() }
+        // Housekeeping, not a wipe. This used to clear the whole workspace on every start,
+        // which meant a conversation continued the next morning had lost the file it was working
+        // on — indistinguishable, from the transcript, from the app losing it. What goes now is
+        // only what cannot belong to anything: scratchpads whose conversation has been deleted,
+        // and any nobody has touched in a week.
+        scope.launch(Dispatchers.IO) {
+            shellWorkspace.prune(conversationRepository.allConversationIds())
+        }
     }
 }

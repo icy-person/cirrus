@@ -51,6 +51,15 @@ class ConversationRepository(
     fun observeMessages(conversationId: String): Flow<List<ChatMessage>> =
         _state.map { state -> state.messagesFor(conversationId) }
 
+    /**
+     * Every conversation that still exists, for the shell workspace's startup housekeeping.
+     *
+     * Unfiltered on purpose: archived threads are still ones you can open, and a scratchpad
+     * deleted because its thread was archived would be a file lost to a filing decision.
+     */
+    suspend fun allConversationIds(): Set<String> =
+        _state.value.conversations.map { it.id }.toSet()
+
     suspend fun getConversation(id: String): Conversation? =
         _state.value.conversations.firstOrNull { it.id == id }
 

@@ -50,6 +50,12 @@ object CommandPolicy {
         "paste", "comm", "join", "shuf", "diff", "cmp", "basename", "dirname", "printf", "echo",
         "seq", "expr", "xxd", "od", "base64", "md5sum", "sha1sum", "sha256sum", "sha512sum",
         "cksum", "strings",
+        // Reshaping text, which is most of what editing actually is: reflowing a paragraph,
+        // lining up columns, fixing tabs, splitting a file into pieces small enough to work on.
+        // Every one of these reads its input and writes stdout or a file named relative to the
+        // topic, and none can run another program.
+        "fmt", "column", "expand", "unexpand", "pr", "split", "csplit", "numfmt", "iconv",
+        "tsort", "realpath",
         // Desktop search and JSON, in the same read-only spirit as grep and sed.
         "rg", "fd", "jq",
         // The machine
@@ -207,7 +213,17 @@ object CommandPolicy {
     /** Redirections. The word after one is a file name, not a program. */
     private val redirectOperators = setOf(">", ">>", "<")
 
-    private const val MAX_LENGTH = 500
+    /**
+     * How long a command may be.
+     *
+     * Raised from 500, which turned out to be the thing standing between the shell and any real
+     * editing. A `sed` with three substitutions and a filename is three hundred characters before
+     * anybody has done anything unusual, and the refusal it produced — "break it into steps" —
+     * cannot be followed for an edit that has to happen in one pass over the file. The cap exists
+     * to stop a model pasting a document into the command line instead of into `input`, and twelve
+     * hundred still does that.
+     */
+    private const val MAX_LENGTH = 1_200
 
     /** Past this, a generated range is not something anybody is going to read. */
     private const val MAX_SEQ = 100_000L
@@ -300,13 +316,21 @@ object CommandPolicy {
         return CommandVerdict.Allowed(segments.map { it.first() })
     }
 
-    /** One line for the tool description, so the model knows the shape of the list up front. */
+    /**
+     * One line for the tool description, so the model knows the shape of the list up front.
+     *
+     * The two headings used to be "read-only" and "writes", and that was actively misleading in the
+     * one case that matters most. `sed` sat under "read-only", so a model asked to change a line in
+     * a file it had just written concluded it had no way to do it and said so — when `sed -i` was
+     * allowed the whole time, and always had been. The policy never distinguished the two lists;
+     * only this sentence did, and it was wrong. What it says now is what the check actually
+     * enforces: every listed program may write, and none of them can write anywhere but here.
+     */
     fun summary(): String = buildString {
-        append("Read-only: ")
-        append(readOnlyPrograms.sorted().joinToString(" "))
-        append(". Writes, inside the workspace only: ")
-        append(workspacePrograms.sorted().joinToString(" "))
-        append(".")
+        append("Available: ")
+        append(allowedPrograms.sorted().joinToString(" "))
+        append(". All of them may write, and none of them can write outside the topic — including ")
+        append("in-place edits like `sed -i` and redirection into a file.")
     }
 
     /**
