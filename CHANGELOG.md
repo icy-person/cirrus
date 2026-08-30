@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [2.2.0] - 2026-08-30
+
+Scratch files stop being treated as rubbish. The premise that made them
+disposable — that nobody could see them — stopped being true in 2.1.0, and this
+is the rest of that change catching up.
+
 ### Added
 
 - **A "clear scratch files after" setting, and it defaults to never.** These files were swept on an
@@ -24,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Files is a button in the chat's top bar**, not an item in the three-dot menu. A feature whose
   entire point is that you can finally see something should not be two taps deep behind a menu.
+
+- **An open reasoning trace shows how the thinking started, not where it has got to.** 2.1.0 showed
+  the tail on the theory that somebody watching a model think wants to see it thinking. In practice
+  the newest tokens are the middle of a thought, out of context by construction; the first few
+  hundred words are where a model states the problem, notices the constraint everybody missed and
+  picks an approach — which is the part worth reading, and the part that explains the answer when it
+  arrives. It also happens to be free: the opening stops changing once the trace passes the cap, so
+  there is nothing left to re-render, where a tail window was still laying out two thousand
+  characters dozens of times a second. The whole trace is still there once it finishes.
 
 - **An open reasoning trace shows how the thinking started, not where it has got to.** 2.1.0 showed
   the tail on the theory that somebody watching a model think wants to see it thinking. In practice
@@ -780,7 +797,8 @@ do things.
   or bridges its tools into the registry.
 - LaTeX is mapped to Unicode, not typeset. There is no layout, so fractions render as `a/b`.
 
-[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/klaibercore/cirrus/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/klaibercore/cirrus/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/klaibercore/cirrus/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/klaibercore/cirrus/compare/v2.0.0...v2.0.1
