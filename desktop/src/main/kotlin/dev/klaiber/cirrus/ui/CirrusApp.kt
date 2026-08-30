@@ -31,6 +31,8 @@ import dev.klaiber.cirrus.ui.agents.AgentsScreen
 import dev.klaiber.cirrus.ui.conversations.ConversationsModel
 import dev.klaiber.cirrus.ui.mcp.McpModel
 import dev.klaiber.cirrus.ui.mcp.McpServersScreen
+import dev.klaiber.cirrus.ui.files.FilesModel
+import dev.klaiber.cirrus.ui.files.FilesScreen
 import dev.klaiber.cirrus.ui.memory.MemoryModel
 import dev.klaiber.cirrus.ui.skills.SkillsExploreScreen
 import dev.klaiber.cirrus.ui.skills.SkillsModel
@@ -88,6 +90,15 @@ sealed interface Screen {
     data object Skills : Screen
 
     data object SkillsExplore : Screen
+
+    /**
+     * The scratch files of one conversation.
+     *
+     * The id is carried on the screen rather than read from wherever the app happens to be:
+     * opening this from a thread and then switching threads underneath it would otherwise show a
+     * different conversation's files under the first one's name.
+     */
+    data class Files(val conversationId: String?) : Screen
 }
 
 /**
@@ -248,6 +259,7 @@ private fun AppContent(
                         onOpenSettings = { go(Screen.Settings) },
                         onNavigateToConversation = ::openChat,
                         onNewChat = { openChat(null) },
+                        onOpenFiles = { id -> go(Screen.Files(id)) },
                         model = chatModel,
                         // With the list resident there is nothing for a hamburger to reveal, so
                         // the button becomes a collapse instead. The two insets are independent:
@@ -319,6 +331,23 @@ private fun AppContent(
                         onOpenConversation = ::openChat,
                         model = agentsModel,
                         notifier = container.notifier,
+                        topInset = TitleBarHeight,
+                        leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
+                    )
+                }
+
+                is Screen.Files -> {
+                    val filesModel = remember(current.conversationId) {
+                        FilesModel(
+                            browser = container.scratchpadBrowser,
+                            downloads = container.downloadSink,
+                            conversationId = current.conversationId,
+                            scope = scope,
+                        )
+                    }
+                    FilesScreen(
+                        onBack = ::back,
+                        model = filesModel,
                         topInset = TitleBarHeight,
                         leadingInset = if (sidebarVisible) 0.dp else TrafficLightWidth,
                     )

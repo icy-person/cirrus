@@ -47,6 +47,7 @@ app/src/main/java/dev/klaiber/cirrus/
 │   ├── conversations/       # ConversationDrawer + ConversationsViewModel
 │   ├── memory/             # MemoryScreen + MemoryViewModel (browse, edit, pin, retire)
 │   ├── skills/             # SkillsScreen (installed) + SkillsExploreScreen + SkillsViewModel
+│   ├── files/              # FilesScreen — the scratchpad explorer and its file viewer
 │   ├── agents/             # AgentsScreen, AgentEditorSheet (AgentDraft), history/template sheets
 │   ├── onboarding/         # OnboardingScreen + OnboardingViewModel — the first-run wizard
 │   ├── settings/           # SettingsScreen + SettingsViewModel
@@ -276,6 +277,22 @@ app/src/main/java/dev/klaiber/cirrus/
   checkout, so the instructions arrive with a sentence saying to take the method and ignore
   everything that assumes a development machine — attached to the instructions, because a rule in
   the system prompt is read before the skill and forgotten by the time it contradicts one.
+- **`SaveFileTool`** — how the model hands over a file it made. The gap it closes was invisible
+  from the inside: `run_command` wrote the file, the model could read it back, and the user could
+  not reach the workspace at all — so "I've saved it to expenses/totals.csv" was a sincere offer
+  nobody could accept. Not a write and not external, both deliberately: `download_file` saves to the
+  same place and is not a write either, nothing leaves the device, and gating "give me my file"
+  behind either switch would be an odd reading of the request.
+- **`ScratchpadBrowser`** — the scratchpad from the *user's* side. The shell tools could list and
+  read these files from the start; the person whose phone they were on could not, so "I saved the
+  totals to expenses/totals.csv" named a file with no screen in the app showing it. It reads and
+  deletes and deliberately cannot write: everything in there was made by a command, and a file the
+  user edited from a viewer is a file the next command's assumptions no longer hold for. `FileKind`
+  is the one judgement it makes — extension first, then a NUL-byte sniff, because the extension is
+  what the author meant and the bytes catch the two cases a name gets wrong (no extension at all,
+  which the shell produces constantly, and a textual name on something that is not). Paths from the
+  UI are contained by comparing canonical paths, not by looking for `..`: `a/../../b` is exactly the
+  form a string test misses, and a path from a screen has never been near `CommandPolicy`.
 - **`DownloadSink`** — where a downloaded file goes so the *user* can open it: MediaStore's
   Downloads collection on Android (no permission on API 29+, and the file outlives an uninstall),
   `~/Downloads` on the desktop. It exists because the first `download_file` did not have it and
@@ -334,6 +351,16 @@ app/src/main/java/dev/klaiber/cirrus/
   right answer for every context that needs *text* — the clipboard, the export, the alternate text
   behind a placeholder (which is what makes a selected paragraph copy as `x² + 1` rather than as a
   hole), and `speakMath` for read-aloud.
+- **A reasoning trace is collapsed while it is written**, and that is a performance rule as much
+  as an editorial one. It used to open itself during streaming; the trace is one `Text` that grows
+  by a token every few dozen milliseconds, so every delta re-measured the whole of it — a thousand
+  tokens of reasoning is a thousand layout passes over a paragraph a thousand tokens long, and it
+  gets worse the longer the model thinks. Collapsed, `AnimatedVisibility` never composes it and a
+  delta costs one recomposition of an unchanged header. Opened mid-stream it shows the last 2,000
+  characters rather than all of it, so the cost per delta stays flat. `ChatScreen`'s `tailSignature`
+  leaves the thinking length out for the same reason: with the section shut nothing changes height,
+  and including it restarted the follow-the-tail effect once per token to scroll to where the list
+  already was.
 - **Help text** lives next to the control it explains, via `HelpBadge`/`HelpTooltip`. If you add
   a setting or a parameter, it needs help copy — that is the whole point of the pattern.
 

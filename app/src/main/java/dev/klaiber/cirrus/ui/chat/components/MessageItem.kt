@@ -268,10 +268,26 @@ private fun AssistantMessage(
 }
 
 /**
- * Collapsible reasoning trace.
+ * Collapsible reasoning trace, collapsed by default — including while it is being written.
  *
- * Expanded while it is the only thing streaming so there is something to watch, then collapsed
- * once the answer starts — the trace is for auditing, not for reading every time.
+ * It used to open itself while the model was thinking, on the theory that there should be something
+ * to watch. Two things were wrong with that. A reasoning trace is *long*, often several times the
+ * length of the answer it precedes, so the transcript filled with text nobody had asked to read and
+ * the answer arrived below the fold. And it was expensive in a way that got worse the longer the
+ * model thought: the trace is one `Text`, it grows by a token every few dozen milliseconds, and
+ * every one of those deltas re-measured and re-laid-out the whole of it. A thousand tokens of
+ * reasoning is a thousand layout passes over a paragraph that is a thousand tokens long by the end,
+ * and the visible symptom is a transcript that stutters and jumps while it scrolls.
+ *
+ * Collapsed, none of that happens at all: [AnimatedVisibility] does not compose its content, so a
+ * delta arriving while the section is shut costs one recomposition of a header whose text has not
+ * changed. Opening it is a tap, and the trace is complete either way — nothing is being hidden,
+ * only left unrendered until somebody wants it.
+ *
+ * Opened *during* streaming it shows the tail rather than the whole trace, for the same reason:
+ * bounded text keeps the cost per delta flat instead of growing with the answer, and the tail is
+ * the part somebody watching a model think actually wants — what it is considering now, not how it
+ * started.
  */
 @Composable
 private fun ThinkingSection(
@@ -279,7 +295,20 @@ private fun ThinkingSection(
     isStreaming: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember(isStreaming) { mutableStateOf(isStreaming) }
+    // Not keyed on `isStreaming`: keying it there means the section snaps shut the moment the
+    // answer starts, throwing away a deliberate tap two seconds after it was made.
+    var expanded by remember { mutableStateOf(false) }
+
+    // Bounded while it is still arriving, whole once it has stopped. `remember` on the derived
+    // value so the substring is not recomputed for every recomposition of the row above it.
+    val shown = remember(thinking, isStreaming, expanded) {
+        when {
+            !expanded -> ""
+            isStreaming && thinking.length > STREAMING_TAIL_CHARS ->
+                thinking.takeLast(STREAMING_TAIL_CHARS).trim()
+            else -> thinking.trim()
+        }
+    }
 
     // Outlined rather than filled. A tinted panel inside a reply competes with the code blocks
     // below it for the reader's "this part is different" signal; a hairline box says the same thing
@@ -314,16 +343,36 @@ private fun ThinkingSection(
                 )
             }
             AnimatedVisibility(visible = expanded) {
-                Text(
-                    text = thinking.trim(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-                )
+                Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp)) {
+                    if (isStreaming && thinking.length > STREAMING_TAIL_CHARS) {
+                        Text(
+                            text = "Showing the end of the reasoning while it is still being " +
+                                "written. The whole of it is here once it finishes.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                    }
+                    Text(
+                        text = shown,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
 }
+
+
+/**
+ * How much of a still-arriving reasoning trace is rendered when somebody opens it.
+ *
+ * The number matters less than the fact that there is one: the cost of a delta has to be constant
+ * rather than proportional to everything thought so far, or a long deliberation gets slower the
+ * longer it runs.
+ */
+private const val STREAMING_TAIL_CHARS = 2_000
 
 /** What the read-aloud button should show for this message. */
 enum class SpeechButtonState { HIDDEN, IDLE, PREPARING, SPEAKING }

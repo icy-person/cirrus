@@ -39,6 +39,7 @@ import dev.klaiber.cirrus.domain.spotify.SpotifyRedirectListener
 import dev.klaiber.cirrus.domain.spotify.SpotifySession
 import dev.klaiber.cirrus.domain.tools.CirrusTool
 import dev.klaiber.cirrus.domain.files.DesktopDownloadSink
+import dev.klaiber.cirrus.domain.files.ScratchpadBrowser
 import dev.klaiber.cirrus.domain.tools.DescribeSettingsTool
 import dev.klaiber.cirrus.domain.tools.DownloadFileTool
 import dev.klaiber.cirrus.domain.tools.DeviceToolSet
@@ -74,6 +75,7 @@ import dev.klaiber.cirrus.domain.tools.shell.DateTimeTool
 import dev.klaiber.cirrus.domain.tools.shell.ListAppsTool
 import dev.klaiber.cirrus.domain.tools.shell.OpenAppTool
 import dev.klaiber.cirrus.domain.tools.shell.RunCommandTool
+import dev.klaiber.cirrus.domain.tools.shell.SaveFileTool
 import dev.klaiber.cirrus.domain.tools.shell.ShellRunner
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import dev.klaiber.cirrus.domain.tools.shell.SystemInfoTool
@@ -310,7 +312,10 @@ class AppContainer(
     private val webSearchTool = WebSearchTool(ollamaClient, settingsRepository)
     private val webFetchTool = WebFetchTool(ollamaClient)
     /** Where a downloaded file goes so the user can open it: their own ~/Downloads. */
-    private val downloadSink = DesktopDownloadSink()
+    val downloadSink = DesktopDownloadSink()
+
+    /** The scratchpad from the user's side, for the files screen. */
+    val scratchpadBrowser = ScratchpadBrowser(shellWorkspace)
 
     private val downloadFileTool = DownloadFileTool(plainHttp, shellWorkspace, downloadSink)
 
@@ -341,6 +346,7 @@ class AppContainer(
         shell = listOf(
             RunCommandTool(shellRunner, shellWorkspace),
             CleanWorkspaceTool(shellWorkspace),
+            SaveFileTool(scratchpadBrowser, downloadSink),
             DateTimeTool(),
             CalendarTool(),
             SystemInfoTool(shellWorkspace),

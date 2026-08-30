@@ -30,11 +30,13 @@ import dev.klaiber.cirrus.domain.tools.shell.InstallAppTool
 import dev.klaiber.cirrus.domain.tools.shell.ListAppsTool
 import dev.klaiber.cirrus.domain.tools.shell.OpenAppTool
 import dev.klaiber.cirrus.domain.tools.shell.RunCommandTool
+import dev.klaiber.cirrus.domain.tools.shell.SaveFileTool
 import dev.klaiber.cirrus.domain.tools.shell.ShellRunner
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import dev.klaiber.cirrus.domain.tools.shell.SystemInfoTool
 import dev.klaiber.cirrus.domain.files.AndroidDownloadSink
 import dev.klaiber.cirrus.domain.files.DownloadSink
+import dev.klaiber.cirrus.domain.files.ScratchpadBrowser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -86,6 +88,12 @@ object AppModule {
     @Singleton
     fun provideDownloadSink(sink: AndroidDownloadSink): DownloadSink = sink
 
+    /** The scratchpad from the user's side, for the files screen. */
+    @Provides
+    @Singleton
+    fun provideScratchpadBrowser(workspace: ShellWorkspace): ScratchpadBrowser =
+        ScratchpadBrowser(workspace)
+
     /**
      * The skill chooser, assembled by hand because the set carries the repository as well as the
      * two tools — it builds the standing brief from the same list `list_skills` returns, and one
@@ -105,6 +113,7 @@ object AppModule {
     fun provideDeviceToolSet(
         runCommand: RunCommandTool,
         cleanWorkspace: CleanWorkspaceTool,
+        saveFile: SaveFileTool,
         dateTime: DateTimeTool,
         calendar: CalendarTool,
         systemInfo: SystemInfoTool,
@@ -114,7 +123,7 @@ object AppModule {
         mediaControl: MediaControlTool,
         location: LocationTool,
     ): DeviceToolSet = DeviceToolSet(
-        shell = listOf(dateTime, calendar, systemInfo, runCommand, cleanWorkspace),
+        shell = listOf(dateTime, calendar, systemInfo, runCommand, cleanWorkspace, saveFile),
         // Media control sits with the apps rather than with Spotify: it drives whatever is playing,
         // which is as likely to be a podcast app, and it is the one path that works without an
         // account of any kind.

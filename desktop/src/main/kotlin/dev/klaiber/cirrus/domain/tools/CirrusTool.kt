@@ -433,7 +433,9 @@ class ToolRegistry(
             "per job so its files stay together. Three rules hold for the whole conversation. Be " +
             "non-destructive: read before you write, and never remove a file you did not create. " +
             "Clean up after yourself by calling clean_workspace before you finish, whenever you " +
-            "have written anything. And keep the work small — this is a scratch pad, not a " +
+            "have written anything. If you make something the user actually wants, hand it over " +
+            "with save_file — they cannot reach the workspace, so a path in it is not an answer. " +
+            "And keep the work small — this is a scratch pad, not a " +
             "development machine. Compilers, package managers and servers are refused by name, " +
             "the workspace cannot reach a real project, background jobs are refused so nothing " +
             "you start would outlive the command, and a topic holds only a few megabytes. Never " +

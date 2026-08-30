@@ -23,6 +23,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dev.klaiber.cirrus.ui.chat.ChatScreen
+import dev.klaiber.cirrus.ui.files.FilesScreen
 import dev.klaiber.cirrus.ui.conversations.ConversationDrawer
 import dev.klaiber.cirrus.ui.agents.AgentsScreen
 import dev.klaiber.cirrus.ui.memory.MemoryScreen
@@ -53,6 +54,8 @@ private object Routes {
     const val SETTINGS_SECTION = "settings/section/{$SECTION_ARG}"
     const val MCP_SERVERS = "settings/mcp"
     const val SKILLS = "skills"
+    const val FILES_ARG = "conversationId"
+    const val FILES = "files?$FILES_ARG={$FILES_ARG}"
     const val SKILLS_EXPLORE = "skills/explore"
     const val MEMORY = "memory"
     const val AGENTS = "agents"
@@ -133,6 +136,9 @@ fun CirrusApp(
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onNavigateToConversation = navController::openChat,
                     onNewChat = { navController.openChat(null) },
+                    onOpenFiles = { id ->
+                        navController.navigate("files?${Routes.FILES_ARG}=${id.orEmpty()}")
+                    },
                 )
             }
 
@@ -193,6 +199,22 @@ fun CirrusApp(
             // Two routes rather than tabs: Explore is a different job from tending what you
             // have, it is where the network is, and Back from it should land on the library rather
             // than leave the screen entirely.
+            // The scratch files belong to a conversation, so the id travels with the route
+            // rather than being read from wherever the app happens to be — opening this from a
+            // thread and then switching threads underneath it would otherwise show the wrong files.
+            composable(
+                route = Routes.FILES,
+                arguments = listOf(
+                    navArgument(Routes.FILES_ARG) {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) {
+                FilesScreen(onBack = { navController.popBackStack() })
+            }
+
             composable(Routes.SKILLS) {
                 SkillsScreen(
                     onBack = { navController.popBackStack() },

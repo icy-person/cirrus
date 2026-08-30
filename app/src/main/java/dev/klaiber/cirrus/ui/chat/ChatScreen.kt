@@ -119,6 +119,8 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onNavigateToConversation: (String) -> Unit,
     onNewChat: () -> Unit,
+    /** Opens the scratch files this thread's shell commands have written. */
+    onOpenFiles: (String?) -> Unit,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -249,7 +251,11 @@ fun ChatScreen(
     val tailSignature = listOf(
         visibleMessages.size,
         lastMessage?.content?.length,
-        lastMessage?.thinking?.length,
+        // Deliberately *not* the thinking length. The reasoning section is collapsed while it is
+        // being written, so a thinking delta changes no height and there is nothing to follow —
+        // including it restarted this effect once per token to scroll to where the list already
+        // was. Somebody who opens the trace mid-stream is reading it, and would rather it held
+        // still than chased its own tail.
         lastMessage?.toolInvocations?.size,
         lastMessage?.toolInvocations?.count { it.isComplete },
         lastMessage?.isStreaming,
@@ -353,6 +359,13 @@ fun ChatScreen(
                                 onClick = {
                                     showOverflow = false
                                     showParameters = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Files") },
+                                onClick = {
+                                    showOverflow = false
+                                    onOpenFiles(state.conversation?.id)
                                 },
                             )
                             DropdownMenuItem(

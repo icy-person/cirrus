@@ -86,6 +86,11 @@ class RunCommandTool @Inject constructor(
             "did not create yourself in this conversation. Nothing outside the workspace can be " +
             "harmed, which means a destructive command is never necessary here — it is only ever " +
             "a mistake with your own working files.\n\n" +
+            "GIVING THE USER A FILE. They cannot reach this workspace — it is inside Cirrus's " +
+            "own storage, and a path in it means nothing to them. When you have made something " +
+            "they actually want, call save_file with it and tell them the name it was saved " +
+            "under; that puts a copy in their Downloads, which is the only way they can open it " +
+            "in anything else.\n\n" +
             "CLEAN UP AFTER YOURSELF. Call clean_workspace with the topic once you have the " +
             "answer, and always before you finish a session in which you wrote files. Topics " +
             "nobody has touched for a while are swept automatically, and the reply tells you when " +
