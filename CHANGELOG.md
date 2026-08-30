@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **An open reasoning trace shows how the thinking started, not where it has got to.** 2.1.0 showed
+  the tail on the theory that somebody watching a model think wants to see it thinking. In practice
+  the newest tokens are the middle of a thought, out of context by construction; the first few
+  hundred words are where a model states the problem, notices the constraint everybody missed and
+  picks an approach — which is the part worth reading, and the part that explains the answer when it
+  arrives. It also happens to be free: the opening stops changing once the trace passes the cap, so
+  there is nothing left to re-render, where a tail window was still laying out two thousand
+  characters dozens of times a second. The whole trace is still there once it finishes.
 
 ## [2.1.1] - 2026-08-30
 

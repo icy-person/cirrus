@@ -284,10 +284,18 @@ private fun AssistantMessage(
  * changed. Opening it is a tap, and the trace is complete either way — nothing is being hidden,
  * only left unrendered until somebody wants it.
  *
- * Opened *during* streaming it shows the tail rather than the whole trace, for the same reason:
- * bounded text keeps the cost per delta flat instead of growing with the answer, and the tail is
- * the part somebody watching a model think actually wants — what it is considering now, not how it
- * started.
+ * Opened *during* streaming it shows the opening of the trace rather than all of it. The bound is
+ * there to keep the cost per delta flat instead of growing with the answer; which end to keep is a
+ * question about what is worth reading, and it is the beginning. The first few hundred words are
+ * where a model states the problem, notices the constraint everybody missed, and picks an approach
+ * — that is the part worth seeing, and it is also the part that explains the answer. The latest
+ * tokens are the middle of a thought, out of context by construction.
+ *
+ * Keeping the head rather than the tail happens to make the rendering free as well. The tail
+ * changes with every delta, so a bounded window still meant re-measuring two thousand characters
+ * dozens of times a second; the head stops changing the moment the trace passes the cap, so after
+ * a second or so of thinking there is nothing left to lay out at all. The whole trace is there
+ * once it finishes.
  */
 @Composable
 private fun ThinkingSection(
@@ -299,13 +307,16 @@ private fun ThinkingSection(
     // answer starts, throwing away a deliberate tap two seconds after it was made.
     var expanded by remember { mutableStateOf(false) }
 
-    // Bounded while it is still arriving, whole once it has stopped. `remember` on the derived
-    // value so the substring is not recomputed for every recomposition of the row above it.
-    val shown = remember(thinking, isStreaming, expanded) {
+    // Bounded while it is still arriving, whole once it has stopped.
+    //
+    // Keyed on the *capped* length rather than on the text: past the cap the head cannot change, so
+    // this stops recomputing entirely rather than producing an identical string per delta. That is
+    // the whole reason the head is cheaper than the tail as well as more useful.
+    val shown = remember(thinking.length.coerceAtMost(STREAMING_HEAD_CHARS), isStreaming, expanded) {
         when {
             !expanded -> ""
-            isStreaming && thinking.length > STREAMING_TAIL_CHARS ->
-                thinking.takeLast(STREAMING_TAIL_CHARS).trim()
+            isStreaming && thinking.length > STREAMING_HEAD_CHARS ->
+                thinking.take(STREAMING_HEAD_CHARS).trim()
             else -> thinking.trim()
         }
     }
@@ -344,10 +355,10 @@ private fun ThinkingSection(
             }
             AnimatedVisibility(visible = expanded) {
                 Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp)) {
-                    if (isStreaming && thinking.length > STREAMING_TAIL_CHARS) {
+                    if (isStreaming && thinking.length > STREAMING_HEAD_CHARS) {
                         Text(
-                            text = "Showing the end of the reasoning while it is still being " +
-                                "written. The whole of it is here once it finishes.",
+                            text = "Showing how the reasoning started. The whole of it is here " +
+                                "once it finishes.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 6.dp),
@@ -370,9 +381,10 @@ private fun ThinkingSection(
  *
  * The number matters less than the fact that there is one: the cost of a delta has to be constant
  * rather than proportional to everything thought so far, or a long deliberation gets slower the
- * longer it runs.
+ * longer it runs. Two thousand characters is a few hundred words, which is about as far as a model
+ * gets before it has said what it thinks the problem is.
  */
-private const val STREAMING_TAIL_CHARS = 2_000
+private const val STREAMING_HEAD_CHARS = 2_000
 
 /** What the read-aloud button should show for this message. */
 enum class SpeechButtonState { HIDDEN, IDLE, PREPARING, SPEAKING }

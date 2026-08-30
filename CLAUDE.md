@@ -360,8 +360,14 @@ app/src/main/java/dev/klaiber/cirrus/
   by a token every few dozen milliseconds, so every delta re-measured the whole of it — a thousand
   tokens of reasoning is a thousand layout passes over a paragraph a thousand tokens long, and it
   gets worse the longer the model thinks. Collapsed, `AnimatedVisibility` never composes it and a
-  delta costs one recomposition of an unchanged header. Opened mid-stream it shows the last 2,000
-  characters rather than all of it, so the cost per delta stays flat. `ChatScreen`'s `tailSignature`
+  delta costs one recomposition of an unchanged header. Opened mid-stream it shows the *first*
+  2,000 characters rather than all of it — the opening is where a model states the problem and picks
+  an approach, which is the part worth reading and the part that explains the answer, where the
+  latest tokens are the middle of a thought and out of context by construction. Keeping the head
+  rather than the tail is also what makes it free: the head stops changing once the trace passes the
+  cap, so there is nothing left to lay out, where a tail window would still re-measure two thousand
+  characters dozens of times a second. The `remember` is keyed on the *capped* length for exactly
+  that reason. `ChatScreen`'s `tailSignature`
   leaves the thinking length out for the same reason: with the section shut nothing changes height,
   and including it restarted the follow-the-tail effect once per token to scroll to where the list
   already was.
