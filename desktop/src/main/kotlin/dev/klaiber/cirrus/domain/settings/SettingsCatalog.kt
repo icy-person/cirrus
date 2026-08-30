@@ -77,7 +77,8 @@ enum class SettingSwitch(
         title = "Allow write actions",
         path = "Settings → Tools → Allow write actions",
         summary = "Tools that change something outside Cirrus and cannot be undone from inside " +
-            "it — opening a GitHub issue or committing a file.",
+            "it — saving a file to the user's Downloads, opening a GitHub issue, committing a " +
+            "file.",
         reader = AppSettings::writeToolsAllowed,
     ),
     SPOTIFY(

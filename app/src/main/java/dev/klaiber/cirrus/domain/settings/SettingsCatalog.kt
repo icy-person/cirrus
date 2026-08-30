@@ -90,8 +90,9 @@ enum class SettingSwitch(
         title = "Allow write actions",
         path = "Settings → Tools → Allow write actions",
         summary = "Tools that change something outside Cirrus and cannot be undone from inside " +
-            "it — opening a GitHub issue, committing a file, editing a Spotify playlist, or any " +
-            "MCP tool that has not declared itself read-only.",
+            "it — saving a file to the user's Downloads, opening a GitHub issue, committing a " +
+            "file, editing a Spotify playlist, or any MCP tool that has not declared itself " +
+            "read-only.",
         reader = AppSettings::writeToolsAllowed,
     ),
     GITHUB(

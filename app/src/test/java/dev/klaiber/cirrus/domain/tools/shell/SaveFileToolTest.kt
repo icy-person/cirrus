@@ -67,6 +67,20 @@ class SaveFileToolTest {
 
     private fun JsonObject.text(key: String): String? = this[key]?.jsonPrimitive?.content
 
+    /**
+     * The gate, asserted rather than assumed.
+     *
+     * This shipped ungated on the reasoning that a file in Downloads is the thing the user asked
+     * for. That argues from intent, and the gate's test is mechanical: the effect outlives the
+     * turn, it happens outside Cirrus — on Android in shared storage, which survives the app being
+     * uninstalled — and calling this again does not undo it, it makes a second copy. All three
+     * hold, so it is a write, and `ToolRegistry` refuses it until write actions are on.
+     */
+    @Test
+    fun `saving a file counts as a write`() {
+        assertTrue(tool.writes)
+    }
+
     @Test
     fun `a file the shell wrote reaches the user's downloads`() = runTest {
         write("expenses", "totals.csv")

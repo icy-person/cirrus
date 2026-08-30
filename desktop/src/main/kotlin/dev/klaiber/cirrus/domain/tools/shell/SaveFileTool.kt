@@ -29,16 +29,24 @@ import kotlinx.serialization.json.JsonPrimitive
  * fetched. This is the other half: anything in the workspace, however it got there, including
  * everything the shell wrote itself.
  *
- * Not a write by the gate's definition, and consistently so — `download_file` saves to the same
- * place and is not one either. A file in the user's Downloads is the thing they asked for, sitting
- * where they asked for it; nothing outside Cirrus is changed that they cannot undo by deleting it,
- * and the sink never overwrites what is already there. Making it a write would mean "give me that
- * file" was refused by default, which would be an odd reading of a request that is *entirely* about
- * giving somebody their own file.
+ * **It is a write**, and it took a second look to see that. The first version was not, on the
+ * reasoning that a file in Downloads is the thing the user asked for and deleting it is something
+ * they can do without us. That argues from intent, and the gate does not: the test is that the
+ * effect outlives the turn, happens outside Cirrus, and cannot be reversed by calling the same tool
+ * again. Saving here meets all three. The file is in shared storage, so on Android it survives
+ * Cirrus being uninstalled; and calling this twice does not undo anything, it produces a second
+ * copy called `totals (1).csv`. Reasoning from what the user probably wanted is exactly how a gate
+ * ends up with a hole in it.
  *
- * Nor is it external: nothing leaves the device. Copying a file from one directory to another does
- * not need the conversation's tools switch, and requiring it would mean the model could not hand
- * over the file it had just been asked to make.
+ * It is *not* external, and that is a separate axis. Nothing leaves the device — this copies a file
+ * from one directory to another — so the conversation's tools switch has no business governing it.
+ * The two switches ask different questions: "may this reach the network?" and "may this do
+ * something I cannot undo from inside the app?".
+ *
+ * The cost is real and worth stating: with write actions off, which is the default, a model asked
+ * for a file will be refused. That refusal names the switch and where to find it, so what the user
+ * sees is "turn on Settings → Tools → Allow write actions and I can put that in your Downloads"
+ * rather than a failure — which is the whole reason `explainRefusal` exists.
  */
 class SaveFileTool(
     private val browser: ScratchpadBrowser,
@@ -46,6 +54,9 @@ class SaveFileTool(
 ) : CirrusTool {
 
     override val name: String = "save_file"
+
+    /** See the note above: it puts a file outside Cirrus that calling this again would not remove. */
+    override val writes: Boolean = true
 
     override val definition: JsonElement = functionSchema(
         name = name,
@@ -61,7 +72,11 @@ class SaveFileTool(
             "there.\n\n" +
             "Do NOT call it for your own working files — an intermediate sort, a page you are " +
             "about to count the lines of. Those belong in the workspace and get cleaned up. This " +
-            "is for the thing the user asked for.",
+            "is for the thing the user asked for.\n\n" +
+            "IT NEEDS WRITE ACTIONS, which are off by default: it puts a file on the user's " +
+            "device that nothing here can take back. If it is refused, say so plainly — tell them " +
+            "which switch turns it on, and offer the contents in your answer instead so they have " +
+            "the work either way.",
         required = listOf("path"),
     ) {
         stringParam(

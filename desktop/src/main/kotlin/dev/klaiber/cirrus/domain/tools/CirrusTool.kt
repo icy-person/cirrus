@@ -434,7 +434,8 @@ class ToolRegistry(
             "non-destructive: read before you write, and never remove a file you did not create. " +
             "Clean up after yourself by calling clean_workspace before you finish, whenever you " +
             "have written anything. If you make something the user actually wants, hand it over " +
-            "with save_file — they cannot reach the workspace, so a path in it is not an answer. " +
+            "with save_file — they cannot reach the workspace, so a path in it is not an answer — " +
+            "and note that it needs write actions, which may be off. " +
             "And keep the work small — this is a scratch pad, not a " +
             "development machine. Compilers, package managers and servers are refused by name, " +
             "the workspace cannot reach a real project, background jobs are refused so nothing " +

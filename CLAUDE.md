@@ -280,9 +280,13 @@ app/src/main/java/dev/klaiber/cirrus/
 - **`SaveFileTool`** — how the model hands over a file it made. The gap it closes was invisible
   from the inside: `run_command` wrote the file, the model could read it back, and the user could
   not reach the workspace at all — so "I've saved it to expenses/totals.csv" was a sincere offer
-  nobody could accept. Not a write and not external, both deliberately: `download_file` saves to the
-  same place and is not a write either, nothing leaves the device, and gating "give me my file"
-  behind either switch would be an odd reading of the request.
+  nobody could accept. **It is a write**, and it shipped for one release as though it were not. The
+  argument for exempting it was that a file in Downloads is the thing the user asked for; the gate's
+  test is mechanical and does not care what was wanted — the effect outlives the turn, it happens
+  outside Cirrus (shared storage on Android, which survives an uninstall), and calling it again
+  makes `totals (1).csv` rather than undoing anything. Reasoning from intent is how a gate acquires
+  a hole. It is *not* external, which is a separate axis: nothing leaves the device, so the
+  conversation's tools switch has nothing to say about it.
 - **`ScratchpadBrowser`** — the scratchpad from the *user's* side. The shell tools could list and
   read these files from the start; the person whose phone they were on could not, so "I saved the
   totals to expenses/totals.csv" named a file with no screen in the app showing it. It reads and
