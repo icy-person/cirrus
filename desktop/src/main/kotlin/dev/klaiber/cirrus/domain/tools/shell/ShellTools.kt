@@ -1,5 +1,6 @@
 package dev.klaiber.cirrus.domain.tools.shell
 
+import dev.klaiber.cirrus.data.repository.SettingsRepository
 import dev.klaiber.cirrus.domain.tools.CirrusTool
 import dev.klaiber.cirrus.domain.tools.TurnContext
 import dev.klaiber.cirrus.domain.tools.github.errorJson
@@ -46,6 +47,7 @@ import kotlinx.serialization.json.putJsonArray
 class RunCommandTool(
     private val runner: ShellRunner,
     private val workspace: ShellWorkspace,
+    private val settingsRepository: SettingsRepository,
 ) : CirrusTool {
 
     override val name: String = "run_command"
@@ -150,13 +152,17 @@ class RunCommandTool(
             }.toString()
 
             is CommandVerdict.Allowed -> {
-                // Rate-limited inside [Scratchpad.sweep], so in practice this does nothing at
-                // all for most commands — which is the point. It used to run before every one,
+                // Nothing at all under the default retention setting, which is "never" — and
+                // rate-limited inside [Scratchpad.sweep] even when it is switched on, so in
+                // practice this does nothing for most commands. It used to run before every one,
                 // and a topic crossing the idle line between two steps of a job disappeared
                 // underneath the model mid-task. It is still called from here rather than from a
                 // timer because a sweep has to be *announced* in the reply it happened in: files
                 // that quietly stopped existing are a puzzle the model spends a turn on.
-                val swept = pad.sweep()
+                val retention = settingsRepository.current.value.scratchpadRetention
+                val swept = retention.idleMs
+                    ?.let { idle -> pad.sweep(idleMs = idle) }
+                    .orEmpty()
 
                 // After the sweep, because the sweep may just have made the room. A budget that
                 // has run out is reported as a refusal rather than an error: the command was

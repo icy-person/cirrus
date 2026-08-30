@@ -256,6 +256,40 @@ class ShellWorkspaceTest {
         assertTrue(File(pad.topicDirectory("job"), "a.txt").exists())
     }
 
+    // ---- Retention -------------------------------------------------------------------------------
+
+    /**
+     * The default, and the reason it changed.
+     *
+     * These files were swept on a timer when nothing in the app could show them, which made
+     * "disposable" a decision taken on the user's behalf about work they had never been shown. With
+     * a Files screen they are the user's, so nothing goes on a clock they did not set.
+     */
+    @Test
+    fun `nothing is cleared by age under the default retention`() {
+        val pad = workspace.scratchpad("thread-one")
+        val old = File(pad.topicDirectory("ancient"), "notes.txt").apply { writeText("x") }
+        old.setLastModified(1_000L)
+
+        // Null is what `ScratchpadRetention.NEVER` supplies.
+        assertTrue(workspace.prune(setOf("thread-one"), staleMs = null).isEmpty())
+        assertTrue(old.exists())
+    }
+
+    /**
+     * "Never" is about age, not about orphans. A scratchpad whose conversation has been deleted has
+     * no screen that can reach it, so keeping it is a leak rather than a promise kept.
+     */
+    @Test
+    fun `an orphan goes even when nothing is cleared by age`() {
+        val orphan = workspace.scratchpad("deleted-thread")
+        File(orphan.topicDirectory("job"), "b.txt").writeText("b")
+
+        val removed = workspace.prune(setOf("still-here"), staleMs = null)
+
+        assertEquals(listOf("c-deleted-thread"), removed)
+    }
+
     /** Oldest first, so the file the last command wrote is not deleted to make room for itself. */
     @Test
     fun `trimming removes the oldest files until it fits`() {

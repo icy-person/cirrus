@@ -86,6 +86,15 @@ data class AppSettings(
      */
     val shellToolsEnabled: Boolean = true,
     /**
+     * How long a conversation's scratch files survive before Cirrus clears them itself.
+     *
+     * Never, by default. These were treated as disposable when nothing in the app could show them;
+     * now that the Files screen can, they are the user's work, and deleting somebody's work on a
+     * timer they did not set is not a default they should have to discover. A total size cap still
+     * applies as a backstop — see [ScratchpadRetention].
+     */
+    val scratchpadRetention: ScratchpadRetention = ScratchpadRetention.Default,
+    /**
      * Lets the model list, open and offer to install apps.
      *
      * Off by default. Everything else in the local set answers a question; this one acts — it puts

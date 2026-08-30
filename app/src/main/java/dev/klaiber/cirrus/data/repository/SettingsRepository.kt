@@ -17,6 +17,7 @@ import dev.klaiber.cirrus.domain.model.AppSettings
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.GenerationParams
 import dev.klaiber.cirrus.domain.model.ReadAloudMode
+import dev.klaiber.cirrus.domain.model.ScratchpadRetention
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import kotlinx.coroutines.CoroutineScope
@@ -163,6 +164,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setPreferOnDeviceRecognition(enabled: Boolean) = edit {
         it[Keys.ON_DEVICE_RECOGNITION] = enabled
+    }
+
+    suspend fun setScratchpadRetention(retention: ScratchpadRetention) = edit {
+        it[Keys.SCRATCHPAD_RETENTION] = retention.name
     }
 
     suspend fun setSkillsEnabled(enabled: Boolean) = edit { it[Keys.SKILLS_ENABLED] = enabled }
@@ -349,6 +354,7 @@ class SettingsRepository @Inject constructor(
         elevenLabsVoiceName = this[Keys.ELEVENLABS_VOICE_NAME] ?: "",
         elevenLabsModelId = this[Keys.ELEVENLABS_MODEL] ?: ElevenLabsModel.Default.id,
         shellToolsEnabled = this[Keys.SHELL_TOOLS] ?: true,
+        scratchpadRetention = ScratchpadRetention.fromName(this[Keys.SCRATCHPAD_RETENTION]),
         appControlEnabled = this[Keys.APP_CONTROL] ?: false,
         locationEnabled = this[Keys.LOCATION] ?: false,
         hasLocationPermission = this[Keys.LOCATION_PERMISSION] ?: false,
@@ -409,6 +415,7 @@ class SettingsRepository @Inject constructor(
         val ELEVENLABS_VOICE_NAME = stringPreferencesKey("elevenlabs_voice_name")
         val ELEVENLABS_MODEL = stringPreferencesKey("elevenlabs_model")
         val SHELL_TOOLS = booleanPreferencesKey("shell_tools")
+        val SCRATCHPAD_RETENTION = stringPreferencesKey("scratchpad_retention")
         val LOCATION = booleanPreferencesKey("location_enabled")
         val LOCATION_PERMISSION = booleanPreferencesKey("location_permission")
         val WRITE_TOOLS = booleanPreferencesKey("write_tools")

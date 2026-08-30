@@ -344,7 +344,7 @@ class AppContainer(
 
     private val deviceToolSet = DeviceToolSet(
         shell = listOf(
-            RunCommandTool(shellRunner, shellWorkspace),
+            RunCommandTool(shellRunner, shellWorkspace, settingsRepository),
             CleanWorkspaceTool(shellWorkspace),
             SaveFileTool(scratchpadBrowser, downloadSink),
             DateTimeTool(),
@@ -492,6 +492,11 @@ class AppContainer(
         // Housekeeping, not a wipe: only scratchpads whose conversation has been deleted, and
         // any nobody has touched in a week. Clearing everything on start meant a conversation
         // continued the next morning had lost the file it was working on.
-        shellWorkspace.prune(conversationRepository.allConversationIds())
+        shellWorkspace.prune(
+            liveConversationIds = conversationRepository.allConversationIds(),
+            // Null under the default, which keeps everything: only scratchpads whose conversation
+            // is gone are dropped then.
+            staleMs = settingsRepository.current.value.scratchpadRetention.idleMs,
+        )
     }
 }

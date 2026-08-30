@@ -8,6 +8,7 @@ import dev.klaiber.cirrus.domain.model.AppSettings
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.GenerationParams
 import dev.klaiber.cirrus.domain.model.ReadAloudMode
+import dev.klaiber.cirrus.domain.model.ScratchpadRetention
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -181,6 +182,9 @@ class SettingsRepository(
     suspend fun setLastConsolidationAt(at: Long) = update { it.copy(lastConsolidationAt = at) }
 
     // ---- Read aloud ----------------------------------------------------------------------------
+
+    suspend fun setScratchpadRetention(retention: ScratchpadRetention) =
+        update { it.copy(scratchpadRetention = retention) }
 
     suspend fun setSkillsEnabled(enabled: Boolean) = update { it.copy(skillsEnabled = enabled) }
 

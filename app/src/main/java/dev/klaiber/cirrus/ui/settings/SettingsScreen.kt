@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.klaiber.cirrus.data.remote.elevenlabs.ElevenLabsVoice
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.ReadAloudMode
+import dev.klaiber.cirrus.domain.model.ScratchpadRetention
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import androidx.compose.foundation.layout.ColumnScope
@@ -650,6 +651,10 @@ fun SettingsSectionScreen(
                     checked = state.settings.shellToolsEnabled,
                     onCheckedChange = viewModel::setShellToolsEnabled,
                 )
+                ScratchpadRetentionSelector(
+                    selected = state.settings.scratchpadRetention,
+                    onSelect = viewModel::setScratchpadRetention,
+                )
                 SwitchRow(
                     title = "Apps and media",
                     subtitle = "List what is installed, open an app, control what is playing",
@@ -813,6 +818,51 @@ private fun SectionHeader(text: String) {
  * Placed above the engine picker because it is the larger decision: which voice reads it matters
  * only once you have settled what it is reading.
  */
+/**
+ * When the shell's scratch files are cleared, if ever.
+ *
+ * A segmented row rather than a menu: four options, all short, and the choice is one people make
+ * once — a dropdown would hide the fact that "never" is even available, which is the option most
+ * people want and the one they would not think to go looking for.
+ */
+@Composable
+private fun ScratchpadRetentionSelector(
+    selected: ScratchpadRetention,
+    onSelect: (ScratchpadRetention) -> Unit,
+) {
+    Column(Modifier.padding(vertical = 8.dp)) {
+        LabelWithHelp(
+            label = "Clear scratch files after",
+            help = "Files written by shell commands live in a scratch folder per conversation, and " +
+                "you can see them under Files in a chat's menu. This is when Cirrus " +
+                "clears them for you. Never is the default: they are your work once you " +
+                "can see them, and deleting somebody's work on a timer they did not set " +
+                "is a poor thing to do quietly. Whatever this says, a scratchpad whose " +
+                "conversation you have deleted goes with it, and a total size cap still " +
+                "applies as a last resort so a runaway command cannot fill the phone.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ScratchpadRetention.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = option == selected,
+                    onClick = { onSelect(option) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index,
+                        ScratchpadRetention.entries.size,
+                    ),
+                    label = { Text(option.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
 @Composable
 private fun ReadAloudModeSelector(selected: ReadAloudMode, onSelect: (ReadAloudMode) -> Unit) {
     Column(Modifier.padding(vertical = 8.dp)) {

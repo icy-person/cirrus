@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A "clear scratch files after" setting, and it defaults to never.** These files were swept on an
+  idle timer and wiped on every app start back when nothing could show them, which made
+  "disposable" a decision taken on your behalf about work you had never been shown. Now that there
+  is a Files screen and a download button they are yours, so nothing is cleared on a clock you did
+  not set. Never, a day, a week or a month, under Settings → Tools.
+
+  Two things happen whatever it says, and the help text says both: a scratchpad whose conversation
+  you have deleted goes with it, since nothing could reach it any more; and a total size cap still
+  applies as a last resort, because filling the device is the one outcome worse than losing a
+  scratch file.
+
 ### Changed
+
+- **Files is a button in the chat's top bar**, not an item in the three-dot menu. A feature whose
+  entire point is that you can finally see something should not be two taps deep behind a menu.
 
 - **An open reasoning trace shows how the thinking started, not where it has got to.** 2.1.0 showed
   the tail on the theory that somebody watching a model think wants to see it thinking. In practice

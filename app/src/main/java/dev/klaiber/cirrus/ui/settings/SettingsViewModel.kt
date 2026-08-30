@@ -19,6 +19,7 @@ import dev.klaiber.cirrus.domain.model.GenerationParams
 import dev.klaiber.cirrus.domain.model.ElevenLabsModel
 import dev.klaiber.cirrus.domain.model.ModelInfo
 import dev.klaiber.cirrus.domain.model.ReadAloudMode
+import dev.klaiber.cirrus.domain.model.ScratchpadRetention
 import dev.klaiber.cirrus.domain.model.SpeechEngine
 import dev.klaiber.cirrus.domain.model.ThemeMode
 import dev.klaiber.cirrus.domain.spotify.SpotifySession
@@ -315,6 +316,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setDefaultParams(params: GenerationParams) {
         viewModelScope.launch { settingsRepository.setDefaultParams(params) }
+    }
+
+    fun setScratchpadRetention(retention: ScratchpadRetention) {
+        viewModelScope.launch { settingsRepository.setScratchpadRetention(retention) }
     }
 
     fun setSkillsEnabled(enabled: Boolean) {

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
@@ -335,6 +336,16 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // In the bar rather than in the overflow. The scratch files were invisible
+                    // for the whole life of the shell, and a feature whose entire purpose is that
+                    // you can finally see something has no business being two taps deep behind a
+                    // menu nobody opens.
+                    IconButton(onClick = { onOpenFiles(state.conversation?.id) }) {
+                        Icon(
+                            imageVector = Icons.Outlined.FolderOpen,
+                            contentDescription = "Files this conversation has written",
+                        )
+                    }
                     IconButton(onClick = onNewChat) {
                         Icon(Icons.Outlined.Add, contentDescription = "New chat")
                     }
@@ -359,13 +370,6 @@ fun ChatScreen(
                                 onClick = {
                                     showOverflow = false
                                     showParameters = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Files") },
-                                onClick = {
-                                    showOverflow = false
-                                    onOpenFiles(state.conversation?.id)
                                 },
                             )
                             DropdownMenuItem(

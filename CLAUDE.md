@@ -177,6 +177,17 @@ app/src/main/java/dev/klaiber/cirrus/
   start, `sweep` before every command (idle topics, and a cap on how many can be live), and
   `clean_workspace` for the model to call when a job is actually over. A sweep says what it took, so
   a missing file is a sentence rather than a puzzle.
+- **Nothing is cleared on a timer by default.** `AppSettings.scratchpadRetention` is
+  `ScratchpadRetention.NEVER` out of the box, and that is a reversal worth understanding. These
+  files were treated as disposable — idle sweep, wipe on process start — back when nothing in the
+  app could show them, which made "disposable" a decision taken on the user's behalf about work they
+  had never been shown. The Files screen changed that, so the setting exists and it defaults to
+  keeping everything. Two rules survive whatever it says: a scratchpad whose *conversation* has been
+  deleted still goes, because it has no screen left that could reach it and keeping it is a leak
+  rather than a promise kept; and `trimTo` still caps the whole workspace, because filling the
+  device is the one outcome worse than losing a scratch file. One number drives both the idle-topic
+  sweep and the whole-scratchpad prune — splitting them would be asking the user about an
+  implementation detail.
 - **Cleanup runs between jobs, not during them.** `sweep` used to run before *every* command with a
   forty-five-minute idle window, which meant a topic crossing that line between two steps of one job
   vanished underneath the model — it wrote `totals.csv`, thought for two commands, and found it

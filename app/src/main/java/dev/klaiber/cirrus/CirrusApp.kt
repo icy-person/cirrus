@@ -10,6 +10,7 @@ import dev.klaiber.cirrus.domain.memory.ConsolidationScheduler
 import dev.klaiber.cirrus.domain.tools.shell.ShellWorkspace
 import dev.klaiber.cirrus.service.GenerationService
 import dev.klaiber.cirrus.data.repository.ConversationRepository
+import dev.klaiber.cirrus.data.repository.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +32,7 @@ class CirrusApp : Application(), Configuration.Provider {
 
     @Inject lateinit var shellWorkspace: ShellWorkspace
     @Inject lateinit var conversationRepository: ConversationRepository
+    @Inject lateinit var settingsRepository: SettingsRepository
 
     /**
      * Workers are constructed by Hilt, not by WorkManager's default factory.
@@ -73,7 +75,12 @@ class CirrusApp : Application(), Configuration.Provider {
         // only what cannot belong to anything: scratchpads whose conversation has been deleted,
         // and any nobody has touched in a week.
         scope.launch(Dispatchers.IO) {
-            shellWorkspace.prune(conversationRepository.allConversationIds())
+            shellWorkspace.prune(
+                liveConversationIds = conversationRepository.allConversationIds(),
+                // Null under the default, which keeps everything: only scratchpads whose
+                // conversation is gone are dropped then.
+                staleMs = settingsRepository.current.value.scratchpadRetention.idleMs,
+            )
         }
     }
 }

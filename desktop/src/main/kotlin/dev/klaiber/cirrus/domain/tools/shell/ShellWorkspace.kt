@@ -75,6 +75,10 @@ class ShellWorkspace(private val root: File) {
      * cannot make that mistake: a scratchpad whose conversation has been deleted has nothing left
      * to belong to, and one nobody has touched in [staleMs] is not a job in hand.
      *
+     * [staleMs] is null under the default retention setting, which is "never" — in which case only
+     * the first rule runs. The age rule is the user's to switch on; the orphan rule is not a
+     * retention policy at all, since those files have no conversation left to be reached from.
+     *
      * [liveConversationIds] being empty is treated as "not known yet" rather than as "every thread
      * was deleted". A repository that has not finished loading must never look like a user who
      * cleared their history, because the two would be told apart only by the files that had
@@ -82,7 +86,7 @@ class ShellWorkspace(private val root: File) {
      */
     fun prune(
         liveConversationIds: Set<String>,
-        staleMs: Long = STALE_MS,
+        staleMs: Long? = STALE_MS,
         now: Long = System.currentTimeMillis(),
     ): List<String> {
         val removed = mutableListOf<String>()
@@ -93,7 +97,10 @@ class ShellWorkspace(private val root: File) {
             val orphaned = id != null &&
                 liveConversationIds.isNotEmpty() &&
                 id !in liveConversationIds
-            val stale = now - directory.lastModifiedDeeply() > staleMs
+            // Null is "keep for ever", which is the default. Orphans still go: a scratchpad
+            // whose conversation has been deleted belongs to nothing and has no screen that can
+            // reach it, so keeping it is a leak rather than a promise kept.
+            val stale = staleMs != null && now - directory.lastModifiedDeeply() > staleMs
             if ((orphaned || stale) && directory.deleteRecursively()) removed += directory.name
         }
         return removed
