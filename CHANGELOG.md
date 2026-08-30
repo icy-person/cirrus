@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [2.1.0] - 2026-08-30
+
+### Added
+
+- **A file browser for the scratchpad, and a viewer that knows what it is looking at.** The shell
+  has been able to write files since it shipped, and read them back, and list them — and the person
+  whose device they were on could not do any of that. "I saved the totals to expenses/totals.csv"
+  was a true sentence about a file with no screen in the app showing it, so the only way to see your
+  own working file was to ask the model to print it back at you one `cat` at a time.
+
+  **Files** in a conversation's overflow menu opens what that thread's commands have written,
+  grouped by the job it belongs to rather than as one flat list, because the useful question is
+  "what did the expenses work leave behind" and not "what files exist". Tapping one opens it, and
+  the viewer renders by format rather than dumping text: markdown as prose, CSV and TSV as a table
+  with quoted fields and embedded commas intact, JSON, HTML, YAML and source highlighted, images
+  decoded, plain text and logs in monospace, and an honest "nothing to show, download it to open it
+  elsewhere" for anything binary. Files with no extension — which the shell produces constantly —
+  are read as text unless their bytes say otherwise.
+
+  **Every file has a download button**, going to the same place `download_file` does: your
+  Downloads folder, where you can open it with something that understands it. Which is the point.
+  Alongside it, copy for anything textual, and delete for a file, a job, or the lot.
+
+- **`save_file`, so the model can actually give you a file it made.** This was the other half of
+  the same gap, and the more embarrassing one: `run_command` could write a file and the model could
+  read it back, so it would say "I've saved the totals to expenses/totals.csv" — a sincere offer
+  that could not be accepted, because the workspace is inside Cirrus's private storage and there
+  was no tool for getting anything out of it. There is now, and the shell's instructions say
+  plainly that a path in the workspace is not an answer to give a user. It copies to Downloads,
+  renames on the way out if the working name was for the model rather than for you, and reports the
+  name it actually landed under.
+
+### Changed
+
+- **Reasoning traces stay collapsed while they are being written.** They used to open themselves,
+  on the theory that a model thinking should have something to watch. Two things were wrong with
+  that. A trace is often several times longer than the answer it precedes, so the transcript filled
+  with text nobody had asked to read and the answer arrived below the fold. And it was expensive in
+  a way that got worse the longer the model thought: the trace is one text block, it grows by a
+  token every few dozen milliseconds, and each of those re-measured and re-laid-out the whole of it
+  — a thousand tokens of reasoning is a thousand layout passes over a paragraph that is a thousand
+  tokens long by the end. The visible symptom was a transcript that stuttered and jumped.
+
+  Collapsed, none of that happens: the text is not rendered at all until you ask for it, and the
+  trace is still complete when you do. Open it mid-stream and you get the tail — what the model is
+  considering now, which is the part anybody watching wants — with the whole of it once it lands.
+  The transcript also no longer chases a box that is not changing height.
+
 ## [2.0.1] - 2026-08-30
 
 Five fixes, and four of them have the same shape: Cirrus did something
@@ -689,7 +737,8 @@ do things.
   or bridges its tools into the registry.
 - LaTeX is mapped to Unicode, not typeset. There is no layout, so fractions render as `a/b`.
 
-[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/klaibercore/cirrus/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/klaibercore/cirrus/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/klaibercore/cirrus/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/klaibercore/cirrus/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/klaibercore/cirrus/compare/v1.8.0...v1.9.0
