@@ -230,7 +230,7 @@ private fun WelcomeStep() {
     )
     Spacer(Modifier.height(8.dp))
     Text(
-        text = "A chat client for Ollama, on your phone.",
+        text = "A chat client for Ollama and LM Studio.",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -293,9 +293,9 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     val uriHandler = LocalUriHandler.current
 
     StepHeader(
-        title = "Where are your models?",
-        body = "Ollama runs either as a hosted service or on a computer of your own. Both work " +
-            "the same way from here, and you can change your mind later in Settings.",
+        title = "Choose your AI provider",
+        body = "Connect Cirrus to Ollama or LM Studio. Your provider controls where model requests " +
+            "go; GitHub, MCP, web and the rest of Cirrus remain available on top of it.",
     )
 
     ChoiceCard(
@@ -307,14 +307,22 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     )
     Spacer(Modifier.height(10.dp))
     ChoiceCard(
-        selected = state.host == HostChoice.LOCAL,
+        selected = state.host == HostChoice.LOCAL_OLLAMA,
         icon = Icons.Outlined.Computer,
-        title = "A computer on my network",
-        body = "Ollama running at home. Nothing leaves your network, and usually no key at all.",
-        onClick = { viewModel.setHost(HostChoice.LOCAL) },
+        title = "Ollama on my network",
+        body = "Ollama running on your computer. Nothing leaves your network and no key is normally needed.",
+        onClick = { viewModel.setHost(HostChoice.LOCAL_OLLAMA) },
+    )
+    Spacer(Modifier.height(10.dp))
+    ChoiceCard(
+        selected = state.host == HostChoice.LM_STUDIO,
+        icon = Icons.Outlined.Computer,
+        title = "LM Studio",
+        body = "Use LM Studio's OpenAI-compatible local server, with model discovery and tool calling.",
+        onClick = { viewModel.setHost(HostChoice.LM_STUDIO) },
     )
 
-    if (state.host == HostChoice.LOCAL) {
+    if (state.host == HostChoice.LOCAL_OLLAMA) {
         Spacer(Modifier.height(20.dp))
         OutlinedTextField(
             value = state.localUrl,
@@ -340,7 +348,31 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
         Spacer(Modifier.height(16.dp))
         ProbeRow(state = state, onTest = viewModel::testConnection)
     }
-}
+
+    if (state.host == HostChoice.LM_STUDIO) {
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(
+            value = state.lmStudioUrl,
+            onValueChange = viewModel::setLmStudioUrl,
+            label = { Text("LM Studio server") },
+            placeholder = { Text(DEFAULT_LM_STUDIO_URL) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "LM Studio uses its OpenAI-compatible API at /v1. On Android, enter the PC's " +
+                "LAN address (for example http://192.168.1.10:1234/v1), not localhost. Enable the " +
+                "server in LM Studio and allow LAN access if required.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        ProbeRow(state = state, onTest = viewModel::testConnection)
+    }
+ }
 
 @Composable
 private fun KeyStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
@@ -418,24 +450,25 @@ private fun ProbeRow(state: OnboardingUiState, onTest: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         when (val probe = state.probe) {
             is ConnectionProbe.Untried -> Unit
-            is ConnectionProbe.Trying -> Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Asking the host what it has…", style = MaterialTheme.typography.bodySmall)
+            is ConnectionProbe.Trying -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        text = "Finding models…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             is ConnectionProbe.Reached -> StatusPanel(
                 ok = true,
-                title = if (probe.modelCount == 0) "Connected, but no models" else "Connected",
-                body = when (probe.modelCount) {
-                    0 -> "The host answered but has nothing installed. Pull one with " +
-                        "\"ollama pull llama3.2\" and test again."
-                    1 -> "One model is available."
-                    else -> "${probe.modelCount} models are available."
-                },
+                title = "Connected",
+                body = "Found ${probe.modelCount} model${if (probe.modelCount == 1) "" else "s"}.",
             )
             is ConnectionProbe.Failed -> StatusPanel(
                 ok = false,
-                title = "Could not reach it",
+                title = "Connection failed",
                 body = probe.message,
             )
         }
@@ -444,39 +477,21 @@ private fun ProbeRow(state: OnboardingUiState, onTest: () -> Unit) {
 
 @Composable
 private fun StatusPanel(ok: Boolean, title: String, body: String) {
-    OutlinedPanel(
-        shape = LargeContainerShape,
-        color = if (ok) {
-            MaterialTheme.colorScheme.surface
-        } else {
-            MaterialTheme.colorScheme.errorContainer
-        },
-        borderColor = if (ok) {
-            MaterialTheme.colorScheme.outlineVariant
-        } else {
-            MaterialTheme.colorScheme.error
-        },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        val onContainer = if (ok) {
-            MaterialTheme.colorScheme.onSurface
-        } else {
-            MaterialTheme.colorScheme.onErrorContainer
-        }
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+    OutlinedPanel {
+        Row(verticalAlignment = Alignment.Top) {
             Icon(
                 imageVector = if (ok) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline,
                 contentDescription = null,
-                tint = onContainer,
-                modifier = Modifier.size(18.dp),
+                tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.width(12.dp))
             Column {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = onContainer)
+                Text(title, style = MaterialTheme.typography.titleSmall)
                 Text(
                     text = body,
                     style = MaterialTheme.typography.bodySmall,
-                    color = onContainer,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -486,249 +501,196 @@ private fun StatusPanel(ok: Boolean, title: String, body: String) {
 @Composable
 private fun ModelStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     StepHeader(
-        title = "Pick a default model",
-        body = "Every new conversation starts with this one. You can change it per conversation " +
-            "from the title bar at any time.",
+        title = "Pick a model",
+        body = "Cirrus found these models at your provider. You can change this later for each " +
+            "conversation or agent.",
     )
 
     if (state.models.isEmpty()) {
         StatusPanel(
             ok = false,
-            title = "No models yet",
-            body = if (state.isCloud) {
-                "Go back a step and test the connection — the list is filled in from the host."
-            } else {
-                "Nothing is installed on that host. Run \"ollama pull llama3.2\" on the computer " +
-                    "running Ollama, then go back and test again."
-            },
+            title = "No models returned",
+            body = "You can continue and choose a model later in Settings.",
         )
-        return
-    }
-
-    state.models.take(MAX_MODEL_ROWS).forEach { model ->
-        ChoiceCard(
-            selected = state.selectedModel == model.name,
-            icon = null,
-            title = model.name,
-            body = listOfNotNull(model.parameterSize, model.quantization, model.family)
-                .joinToString(" · ")
-                .ifBlank { "Available on this host" },
-            onClick = { viewModel.selectModel(model.name) },
-        )
-        Spacer(Modifier.height(8.dp))
-    }
-
-    if (state.models.size > MAX_MODEL_ROWS) {
-        Text(
-            text = "…and ${state.models.size - MAX_MODEL_ROWS} more, in the model picker.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    } else {
+        state.models.forEach { model ->
+            ChoiceCard(
+                selected = state.selectedModel == model.name,
+                icon = Icons.Outlined.Computer,
+                title = model.name,
+                body = model.parameterSize?.let { "${it} parameters" } ?: "Available model",
+                onClick = { viewModel.selectModel(model.name) },
+            )
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 
 @Composable
 private fun ExtrasStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     val uriHandler = LocalUriHandler.current
-    var gitHubVisible by remember { mutableStateOf(false) }
 
     StepHeader(
-        title = "Anything else?",
-        body = "All optional, and all reachable later from Settings. Skip the lot if you would " +
-            "rather just start talking.",
+        title = "Optional extras",
+        body = "GitHub and ElevenLabs are optional. You can skip both and enable them later in " +
+            "Settings.",
     )
 
-    NotificationsCard()
+    OutlinedPanel {
+        Column {
+            Text("GitHub", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = if (state.gitHubSaved) {
+                    "A GitHub token is already saved."
+                } else {
+                    "Give the model access to repositories, issues and pull requests."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            LinkButton("Create GitHub token") { uriHandler.openUri(GITHUB_TOKEN_URL) }
+            Spacer(Modifier.height(10.dp))
+            SecretField(
+                value = state.gitHubToken,
+                onValueChange = viewModel::setGitHubToken,
+                label = "GitHub token",
+                placeholder = "github_pat_…",
+                saved = state.gitHubSaved,
+            )
+        }
+    }
+
+    Spacer(Modifier.height(14.dp))
+    OutlinedPanel {
+        Column {
+            Text("ElevenLabs", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = if (state.elevenLabsSaved) {
+                    "An ElevenLabs key is already saved."
+                } else {
+                    "Optional cloud voice synthesis for read-aloud."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            LinkButton("Get an ElevenLabs key") { uriHandler.openUri(ELEVENLABS_URL) }
+            Spacer(Modifier.height(10.dp))
+            SecretField(
+                value = state.elevenLabsKey,
+                onValueChange = viewModel::setElevenLabsKey,
+                label = "ElevenLabs API key",
+                placeholder = "paste your key",
+                saved = state.elevenLabsSaved,
+            )
+        }
+    }
 
     Spacer(Modifier.height(16.dp))
-    Text("GitHub", style = MaterialTheme.typography.titleSmall)
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = "Lets the model read your issues, pull requests and code. Reading only — writing " +
-            "stays off until you switch it on yourself.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(10.dp))
-    if (state.gitHubSaved) {
-        SavedRow("A GitHub token is saved.")
-    } else {
-        OutlinedTextField(
-            value = state.gitHubToken,
-            onValueChange = viewModel::setGitHubToken,
-            label = { Text("Personal access token") },
-            placeholder = { Text("github_pat_… or ghp_…") },
-            singleLine = true,
-            visualTransformation = if (gitHubVisible) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
-                IconButton(onClick = { gitHubVisible = !gitHubVisible }) {
-                    Icon(
-                        imageVector = if (gitHubVisible) {
-                            Icons.Outlined.VisibilityOff
-                        } else {
-                            Icons.Outlined.Visibility
-                        },
-                        contentDescription = if (gitHubVisible) "Hide token" else "Show token",
-                    )
-                }
-            },
-            shape = ContainerShape,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton(
-                label = "Save token",
-                onClick = viewModel::saveGitHubToken,
-                enabled = state.gitHubToken.isNotBlank(),
-            )
-            LinkButton("Create one") { uriHandler.openUri(GITHUB_TOKEN_URL) }
-        }
-    }
-
-    Spacer(Modifier.height(20.dp))
-    Text("Read answers aloud", style = MaterialTheme.typography.titleSmall)
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = "Android's own voice works with no key at all. An ElevenLabs key buys a better " +
-            "one, and is worth skipping unless you already have it.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(10.dp))
-    if (state.elevenLabsSaved) {
-        SavedRow("An ElevenLabs key is saved.")
-    } else {
-        OutlinedTextField(
-            value = state.elevenLabsKey,
-            onValueChange = viewModel::setElevenLabsKey,
-            label = { Text("ElevenLabs key (optional)") },
-            placeholder = { Text("sk_…") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            shape = ContainerShape,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton(
-                label = "Save key",
-                onClick = viewModel::saveElevenLabsKey,
-                enabled = state.elevenLabsKey.isNotBlank(),
-            )
-            LinkButton("elevenlabs.io") { uriHandler.openUri(ELEVENLABS_URL) }
-        }
-    }
+    NotificationsCard()
 }
 
-/**
- * Asks for the notification permission here rather than at the first surprise.
- *
- * Two things in Cirrus are silent without it and unexplainable when silent: an answer that finishes
- * while the screen is off, and every scheduled agent.
- */
+@Composable
+private fun SecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    saved: Boolean,
+) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(if (saved && value.isBlank()) "Saved $label" else label) },
+        placeholder = { Text(placeholder) },
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    imageVector = if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                    contentDescription = if (visible) "Hide" else "Show",
+                )
+            }
+        },
+        shape = ContainerShape,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
 @Composable
 private fun NotificationsCard() {
-    var asked by remember { mutableStateOf(false) }
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { asked = true }
-
-    OutlinedPanel(shape = LargeContainerShape, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Outlined.Notifications,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Notifications", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = "So a long answer, or a scheduled agent, can tell you it has finished.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !asked) {
-                PillButton(
-                    label = "Allow",
-                    onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                    style = PillStyle.Secondary,
-                )
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val launcher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { }
+        OutlinedPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Notifications, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Notifications", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Allow notifications so scheduled agents can tell you when they finish.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                    Text("Allow")
+                }
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DoneStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     StepHeader(
-        title = "Ready",
-        body = if (state.selectedModel.isNotBlank()) {
-            "New conversations will use ${state.selectedModel}."
-        } else {
-            "Pick a model from the title bar whenever you are ready — everything else is set up."
-        },
+        title = "You are ready",
+        body = "Cirrus is connected. Everything else can be changed later from Settings.",
     )
 
-    Text("Start with an agent?", style = MaterialTheme.typography.titleSmall)
-    Spacer(Modifier.height(4.dp))
+    StatusPanel(
+        ok = true,
+        title = "${state.models.size} model${if (state.models.size == 1) "" else "s"} available",
+        body = state.selectedModel.takeIf { it.isNotBlank() }?.let { "Default: $it" }
+            ?: "Choose a model from Settings when you are ready.",
+    )
+
+    Spacer(Modifier.height(16.dp))
     Text(
-        text = "A prompt that runs on a schedule and leaves the answer waiting for you. Its " +
-            "threads stay on the agents screen, not in your conversation list. Pick one to " +
-            "create it, or skip — you can add one any time.",
+        text = "Optional integrations",
+        style = MaterialTheme.typography.titleSmall,
+    )
+    Spacer(Modifier.height(8.dp))
+    if (state.gitHubSaved) SavedRow("GitHub token saved")
+    if (state.elevenLabsSaved) SavedRow("ElevenLabs key saved")
+    if (!state.gitHubSaved && !state.elevenLabsSaved) {
+        Text(
+            "Nothing else is required. MCP servers, memory, skills and tools are available in Settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    Spacer(Modifier.height(20.dp))
+    Text(
+        text = "Provider: ${if (state.isLmStudio) "LM Studio" else if (state.isCloud) "Ollama hosted" else "Local Ollama"}",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Spacer(Modifier.height(12.dp))
-
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AgentTemplate.All.filterNot { it.needsGitHub }.take(MAX_STARTER_AGENTS).forEach { template ->
-            FilterChip(
-                selected = state.starterTemplate == template,
-                onClick = { viewModel.chooseStarter(template) },
-                label = { Text(template.name) },
-            )
-        }
-    }
-
-    state.starterTemplate?.let { template ->
-        Spacer(Modifier.height(14.dp))
-        OutlinedPanel(shape = LargeContainerShape, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp)) {
-                Text(
-                    text = "${template.name} · %02d:%02d".format(
-                        template.minuteOfDay / 60,
-                        template.minuteOfDay % 60,
-                    ),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = template.prompt,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
 }
 
 @Composable
 private fun SavedRow(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Icon(
             imageVector = Icons.Outlined.CheckCircle,
             contentDescription = null,
@@ -742,76 +704,45 @@ private fun SavedRow(text: String) {
 
 @Composable
 private fun LinkButton(label: String, onClick: () -> Unit) {
-    PillButton(
-        label = label,
-        onClick = onClick,
-        style = PillStyle.Secondary,
-        icon = Icons.Outlined.OpenInNew,
-    )
+    TextButton(onClick = onClick) {
+        Text(label)
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
+    }
 }
 
-/** One of a small set of mutually exclusive answers, as a card rather than a radio button. */
 @Composable
 private fun ChoiceCard(
     selected: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector?,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     body: String,
     onClick: () -> Unit,
 ) {
-    OutlinedPanel(
-        onClick = onClick,
-        shape = LargeContainerShape,
-        color = if (selected) {
-            MaterialTheme.colorScheme.surfaceContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        borderColor = if (selected) {
-            MaterialTheme.colorScheme.onSurface
-        } else {
-            MaterialTheme.colorScheme.outlineVariant
-        },
-        modifier = Modifier.fillMaxWidth(),
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(LargeContainerShape),
+        tonalElevation = if (selected) 2.dp else 0.dp,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
     ) {
         Row(
-            modifier = Modifier.padding(16.dp).heightIn(min = 44.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(16.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(14.dp))
-            }
+            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (selected) {
                 Spacer(Modifier.width(10.dp))
-                Icon(
-                    imageVector = Icons.Outlined.CheckCircle,
-                    contentDescription = "Selected",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(18.dp),
-                )
+                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
 }
-
-private const val MAX_MODEL_ROWS = 8
-private const val MAX_STARTER_AGENTS = 4

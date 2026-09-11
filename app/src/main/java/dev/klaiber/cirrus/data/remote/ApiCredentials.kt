@@ -34,6 +34,13 @@ class ApiCredentials @Inject constructor() {
     /** True for OpenAI-compatible endpoints such as LM Studio (`http://host:1234/v1`). */
     fun isOpenAiCompatible(): Boolean = baseUrl.trimEnd('/').endsWith("/v1", ignoreCase = true)
 
+    /** True when the configured endpoint is an LM Studio OpenAI-compatible server. */
+    fun isLmStudio(): Boolean = isOpenAiCompatible() && (
+        baseUrl.contains("localhost:1234", ignoreCase = true) ||
+            baseUrl.contains("127.0.0.1:1234", ignoreCase = true) ||
+            baseUrl.contains(":1234/v1", ignoreCase = true)
+        )
+
     companion object {
         const val DEFAULT_BASE_URL = "https://ollama.com"
 
