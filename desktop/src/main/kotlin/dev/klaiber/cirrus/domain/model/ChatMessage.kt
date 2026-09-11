@@ -27,6 +27,8 @@ data class ToolInvocation(
     val resultJson: String? = null,
     val errorMessage: String? = null,
     val durationMs: Long? = null,
+    /** Backend-provided tool-call id, required by OpenAI-compatible follow-up messages. */
+    val toolCallId: String? = null,
 ) {
     val isComplete: Boolean get() = resultJson != null || errorMessage != null
 }
