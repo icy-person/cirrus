@@ -6,7 +6,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /**
- * Wire model for `POST /api/chat`.
+ * Wire model for `POST /api/chat` and the internal request representation used by the
+ * OpenAI-compatible LM Studio transport.
  *
  * `think` and `format` are [JsonElement] because Ollama accepts more than one shape for each:
  * `think` is a boolean or an effort string, and `format` is the string "json" or a JSON schema.
@@ -32,11 +33,16 @@ data class MessageDto(
     val images: List<String>? = null,
     @SerialName("tool_calls") val toolCalls: List<ToolCallDto>? = null,
     @SerialName("tool_name") val toolName: String? = null,
+    /** OpenAI-compatible tool result correlation id. */
+    @SerialName("tool_call_id") val toolCallId: String? = null,
 )
 
 @Serializable
 data class ToolCallDto(
     val function: ToolCallFunctionDto,
+    /** OpenAI-compatible streamed tool-call id. */
+    val id: String? = null,
+    val type: String? = null,
 )
 
 @Serializable
@@ -96,9 +102,6 @@ data class ShowRequestDto(
     val model: String,
 )
 
-/**
- * Wire model for `POST /api/show`, trimmed to the fields the picker needs.
- */
 @Serializable
 data class ShowResponseDto(
     val capabilities: List<String> = emptyList(),
@@ -138,7 +141,6 @@ data class WebFetchResponseDto(
     val links: List<String> = emptyList(),
 )
 
-/** Ollama's error envelope, returned as `{"error": "..."}` alongside a non-2xx status. */
 @Serializable
 data class ErrorResponseDto(
     val error: String? = null,
