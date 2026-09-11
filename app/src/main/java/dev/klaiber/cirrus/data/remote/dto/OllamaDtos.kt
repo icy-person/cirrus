@@ -32,11 +32,16 @@ data class MessageDto(
     val images: List<String>? = null,
     @SerialName("tool_calls") val toolCalls: List<ToolCallDto>? = null,
     @SerialName("tool_name") val toolName: String? = null,
+    /** OpenAI-compatible tool result correlation id. */
+    @SerialName("tool_call_id") val toolCallId: String? = null,
 )
 
 @Serializable
 data class ToolCallDto(
     val function: ToolCallFunctionDto,
+    /** OpenAI-compatible streamed tool-call id. */
+    val id: String? = null,
+    val type: String? = null,
 )
 
 @Serializable
