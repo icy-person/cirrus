@@ -31,6 +31,9 @@ class ApiCredentials @Inject constructor() {
 
     fun isCloudHost(): Boolean = baseUrl.contains("ollama.com", ignoreCase = true)
 
+    /** True for OpenAI-compatible endpoints such as LM Studio (`http://host:1234/v1`). */
+    fun isOpenAiCompatible(): Boolean = baseUrl.trimEnd('/').endsWith("/v1", ignoreCase = true)
+
     companion object {
         const val DEFAULT_BASE_URL = "https://ollama.com"
 
