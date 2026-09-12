@@ -74,6 +74,10 @@ class ToolRegistryTest {
         gitHubCredentials = GitHubCredentials()
         spotifyCredentials = SpotifyCredentials()
         val apiCredentials = ApiCredentials()
+        apiCredentials.update(
+            apiKey = "test-key",
+            baseUrl = ApiCredentials.DEFAULT_BASE_URL,
+        )
         settings = SettingsRepository(
             dataStore = dataStore,
             secretCipher = SecretCipher(),
