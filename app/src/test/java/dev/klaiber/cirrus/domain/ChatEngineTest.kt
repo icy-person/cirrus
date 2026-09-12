@@ -101,12 +101,13 @@ class ChatEngineTest {
         val dataStore = PreferenceDataStoreFactory.create(scope = scope) {
             File(System.getProperty("java.io.tmpdir"), "cirrus-settings-${System.nanoTime()}.preferences_pb")
         }
+        val apiCredentials = ApiCredentials()
         val gitHubCredentials = GitHubCredentials()
         val memoryRepository = MemoryRepository(EmptyMemoryDao())
         val settingsRepository = SettingsRepository(
             dataStore = dataStore,
             secretCipher = SecretCipher(),
-            credentials = ApiCredentials(),
+            credentials = apiCredentials,
             gitHubCredentials = gitHubCredentials,
             elevenLabsCredentials = ElevenLabsCredentials(),
             spotifyCredentials = SpotifyCredentials(),
@@ -202,6 +203,7 @@ class ChatEngineTest {
             settingsRepository = settingsRepository,
             gitHubCredentials = gitHubCredentials,
             spotifyCredentials = SpotifyCredentials(),
+            apiCredentials = apiCredentials,
         )
     }
 
@@ -337,8 +339,6 @@ class ChatEngineTest {
         server.enqueue(simpleResponse())
         val history = listOf(userMessage("one"), userMessage("two"), userMessage("three"))
         engine.respond(conversation(), history, AppSettings(contextMessageLimit = 2)).toList()
-        // Asserted on the messages rather than the whole body: tool descriptions are in there too,
-        // and one of them legitimately contains the word "one".
         val body = server.takeRequest().body!!.utf8()
         assertTrue(body.contains(""""content":"two""""))
         assertTrue(body.contains(""""content":"three""""))
@@ -367,7 +367,6 @@ class ChatEngineTest {
         val finished = events.filterIsInstance<TurnEvent.Finished>().single()
         assertEquals("stop", finished.stats.doneReason)
 
-        // First chat request, then the tool's own request, then the follow-up chat request.
         assertEquals("/api/chat", server.takeRequest().url.encodedPath)
         assertEquals("/api/web_search", server.takeRequest().url.encodedPath)
         val followUp = server.takeRequest()
@@ -401,17 +400,12 @@ class ChatEngineTest {
         assertTrue(toolFinished.invocation.errorMessage!!.contains("Unknown tool"))
     }
 
-    /**
-     * The turn used to end the moment the budget ran out, on whatever the model had said before
-     * reaching for a tool — which reads like the model choosing to stop mid-task. It now gets one
-     * more pass, without tools, to answer with what it has.
-     */
     @Test
     fun `answers instead of stopping when the tool budget is spent`() = runTest {
-        server.enqueue(toolCallResponse()) // Round one: asks for a tool, and gets it.
+        server.enqueue(toolCallResponse())
         server.enqueue(searchResponse())
-        server.enqueue(toolCallResponse()) // Budget spent, but the model asks again anyway.
-        server.enqueue(simpleResponse()) // The wrap-up round, where it finally answers.
+        server.enqueue(toolCallResponse())
+        server.enqueue(simpleResponse())
 
         val events = engine.respond(
             conversation(toolsEnabled = true),
@@ -424,23 +418,19 @@ class ChatEngineTest {
         assertTrue(ran.first().invocation.resultJson!!.contains("https://example.com"))
         assertTrue(ran.last().invocation.errorMessage!!.contains("Tool budget spent"))
 
-        // The turn's last word is an answer, not an unanswered call.
         val answer = events.filterIsInstance<TurnEvent.ContentDelta>().joinToString("") { it.text }
         assertEquals("ok", answer)
         assertTrue(events.last() is TurnEvent.Finished)
         assertEquals(4, server.requestCount)
 
-        server.takeRequest() // The first chat request, which did offer tools.
-        server.takeRequest() // The tool's own request.
-        // Nothing is gained by offering tools that can no longer run, and a model that sees them
-        // will keep calling them.
+        server.takeRequest()
+        server.takeRequest()
         assertFalse(server.takeRequest().body!!.utf8().contains("\"tools\""))
         assertTrue(server.takeRequest().body!!.utf8().contains("Tool budget spent"))
     }
 
     @Test
     fun `stops asking after one wrap-up round`() = runTest {
-        // A model that ignores the missing tool list and keeps calling must not loop forever.
         server.enqueue(toolCallResponse())
         server.enqueue(searchResponse())
         server.enqueue(toolCallResponse())
@@ -453,13 +443,11 @@ class ChatEngineTest {
         ).toList()
 
         assertTrue(events.last() is TurnEvent.Finished)
-        // Chat, web_search, chat, chat — and then it gives up rather than asking a fourth time.
         assertEquals(4, server.requestCount)
     }
 
     // ---- Interrupted streams -----------------------------------------------------------------
 
-    /** A stream that ends without its terminal chunk was cut short, not finished. */
     @Test
     fun `surfaces a stream cut short after content as an error`() = runTest {
         server.enqueue(
@@ -475,7 +463,6 @@ class ChatEngineTest {
         }
     }
 
-    /** Nothing reached the screen, so re-issuing the round cannot duplicate anything. */
     @Test
     fun `retries a round that died before producing anything`() = runTest {
         server.enqueue(MockResponse.Builder().body("").build())
@@ -493,9 +480,6 @@ class ChatEngineTest {
 
     @Test
     fun `does not execute an external tool when the conversation has them switched off`() = runTest {
-        // The switch governs what may reach off the phone. A model that asks for web_search anyway
-        // — from an earlier turn, or by guessing — has to be told the tool does not exist, or the
-        // switch is decoration.
         server.enqueue(toolCallResponse())
         server.enqueue(simpleResponse())
 
@@ -505,9 +489,6 @@ class ChatEngineTest {
             AppSettings(),
         ).toList()
 
-        // The refusal has to say *why*, not just "no". A model told "unknown tool" concludes the
-        // app cannot search the web at all and tells the user so; one told which switch is off can
-        // ask them to turn it on.
         val finished = events.filterIsInstance<TurnEvent.ToolFinished>()
         assertTrue(
             "the refusal should name the switch that is in the way",
@@ -547,10 +528,6 @@ class ChatEngineTest {
         assertTrue(body.contains("\"num_predict\":24"))
     }
 
-    /**
-     * Ollama enables thinking by default on a model that supports it, so the flag has to be sent
-     * explicitly — and the budget has to survive a model that reasons anyway.
-     */
     @Test
     fun `disables thinking and widens the budget for a thinking model`() = runTest {
         server.enqueue(titleResponse("Centering a div"))
@@ -600,12 +577,6 @@ class ChatEngineTest {
     }
 }
 
-/**
- * A memory store with nothing in it.
- *
- * The tool loop under test never touches memory; this exists so the registry can be built without
- * dragging Room into a JVM test.
- */
 private class EmptyMemoryDao : MemoryDao {
     override fun observeActive() = kotlinx.coroutines.flow.flowOf(emptyList<MemoryEntity>())
     override fun observeAll() = kotlinx.coroutines.flow.flowOf(emptyList<MemoryEntity>())
@@ -620,7 +591,6 @@ private class EmptyMemoryDao : MemoryDao {
     override suspend fun deleteAll() = Unit
 }
 
-/** Records rather than posts, since there is no notification manager in a JVM test. */
 private class RecordingNotifier : Notifier {
     val posted = mutableListOf<Pair<String, String>>()
 
