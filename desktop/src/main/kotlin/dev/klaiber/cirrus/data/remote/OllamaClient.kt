@@ -154,15 +154,42 @@ class OllamaClient @Inject constructor(
 
     suspend fun listModels(): List<TagModelDto> = withContext(Dispatchers.IO) {
         if (credentials.isOpenAiCompatible()) {
-            val response = executeText(httpClient.newCall(buildRequest("/models", null)))
-            val data = json.parseToJsonElement(response).jsonObject["data"]?.jsonArrayOrEmpty()
-                ?: JsonArray(emptyList())
-            data.mapNotNull { element ->
-                element.jsonObject["id"]?.jsonPrimitive?.contentOrNull?.let(::TagModelDto)
-            }
+            lmStudioModelsList() ?: openAiModelsList()
         } else {
             executeForJson(httpClient.newCall(buildRequest("/api/tags", null)), TagsResponseDto.serializer()).models
         }
+    }
+
+    private fun openAiModelsList(): List<TagModelDto> {
+        val response = executeText(httpClient.newCall(buildRequest("/models", null)))
+        val data = json.parseToJsonElement(response).jsonObject["data"]?.jsonArrayOrEmpty()
+            ?: JsonArray(emptyList())
+        return data.mapNotNull { element ->
+            element.jsonObject["id"]?.jsonPrimitive?.contentOrNull?.let(::TagModelDto)
+        }
+    }
+
+    /**
+     * LM Studio's own `/api/v0/models` sits alongside the OpenAI-compatible `/v1` surface and
+     * answers with quantization, architecture and context length that a plain OpenAI client never
+     * sees. Any other OpenAI-compatible server (vLLM, llama.cpp, a cloud router) simply does not
+     * have this route, so a failure here is expected and falls back silently to [openAiModelsList].
+     */
+    private fun lmStudioModelsList(): List<TagModelDto>? = runCatching {
+        val response = executeText(httpClient.newCall(buildRootRequest("/api/v0/models", null)))
+        val data = json.parseToJsonElement(response).jsonObject["data"]?.jsonArrayOrEmpty() ?: return null
+        data.mapNotNull { it.jsonObject.toTagModel() }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun JsonObject.toTagModel(): TagModelDto? {
+        val id = this["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        return TagModelDto(
+            name = id,
+            details = dev.klaiber.cirrus.data.remote.dto.ModelDetailsDto(
+                family = this["arch"]?.jsonPrimitive?.contentOrNull,
+                quantizationLevel = this["quantization"]?.jsonPrimitive?.contentOrNull,
+            ),
+        )
     }
 
     suspend fun showModel(model: String): ShowResponseDto = withContext(Dispatchers.IO) {
@@ -183,6 +210,52 @@ class OllamaClient @Inject constructor(
             executeForJson(httpClient.newCall(buildRequest("/api/show", payload)), ShowResponseDto.serializer())
         }
     }
+
+    /**
+     * LM Studio's per-model detail route (`/api/v0/models/{id}`), reshaped into the same
+     * [ShowResponseDto] Ollama's `/api/show` returns, so [ModelCapabilityDetector] and
+     * [dev.klaiber.cirrus.data.repository.ModelRepository] need no second code path.
+     *
+     * Best-effort: a host that is not LM Studio, or an LM Studio old enough to lack `/api/v0`,
+     * simply returns null here and the caller falls back to the bare stub it always had. LM
+     * Studio's `capabilities` array currently reports `tool_use`; a "vlm" model `type` implies
+     * vision even when the array does not say so yet.
+     */
+    private fun lmStudioShowModel(model: String): ShowResponseDto? = runCatching {
+        val encodedId = java.net.URLEncoder.encode(model, "UTF-8")
+        val response = executeText(httpClient.newCall(buildRootRequest("/api/v0/models/$encodedId", null)))
+        val obj = json.parseToJsonElement(response).jsonObject
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val type = obj["type"]?.jsonPrimitive?.contentOrNull
+        val arch = obj["arch"]?.jsonPrimitive?.contentOrNull
+        val maxContext = obj["max_context_length"]?.jsonPrimitive?.intOrNull
+        val rawCapabilities = obj["capabilities"]?.jsonArrayOrEmpty()
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+            .orEmpty()
+        val capabilities = buildSet {
+            add(if (type == "embeddings") "embedding" else "completion")
+            if (type == "vlm") add("vision")
+            rawCapabilities.forEach { wire ->
+                when (wire.lowercase()) {
+                    "tool_use", "tools" -> add("tools")
+                    "vision" -> add("vision")
+                    "reasoning", "thinking" -> add("thinking")
+                }
+            }
+        }
+        ShowResponseDto(
+            capabilities = capabilities.toList(),
+            details = dev.klaiber.cirrus.data.remote.dto.ModelDetailsDto(
+                family = arch,
+                quantizationLevel = obj["quantization"]?.jsonPrimitive?.contentOrNull,
+            ),
+            modelInfo = maxContext?.let { length ->
+                buildJsonObject { put("${arch ?: "model"}.context_length", length) }
+            },
+            remoteModel = id,
+            remoteHost = credentials.baseUrl,
+        )
+    }.getOrNull()
 
     suspend fun webSearch(query: String, maxResults: Int): WebSearchResponseDto = withContext(Dispatchers.IO) {
         requireCredentials()
@@ -285,6 +358,26 @@ class OllamaClient @Inject constructor(
             .header("Accept", "application/json")
         if (body != null) builder.post(body.toRequestBody(JSON_MEDIA_TYPE))
         return builder.build()
+    }
+
+    /**
+     * Same as [buildRequest], but against the server root rather than the configured `/v1` base.
+     * Used only for LM Studio's own `/api/v0/...` routes, which sit next to (not under) `/v1`.
+     */
+    private fun buildRootRequest(path: String, body: String?): Request {
+        val builder = Request.Builder()
+            .url(lmStudioRoot() + path)
+            .header("Accept", "application/json")
+        if (body != null) builder.post(body.toRequestBody(JSON_MEDIA_TYPE))
+        return builder.build()
+    }
+
+    /** [ApiCredentials.baseUrl] without its `/v1` suffix, so LM Studio's own `/api/v0/...` routes
+     * can be reached alongside the OpenAI-compatible surface. Case-insensitive because
+     * [ApiCredentials.isOpenAiCompatible] is too. */
+    private fun lmStudioRoot(): String {
+        val base = credentials.baseUrl
+        return if (base.endsWith("/v1", ignoreCase = true)) base.dropLast(3) else base
     }
 
     private fun executeText(call: Call): String {
