@@ -95,7 +95,16 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 host = detectHost(current.baseUrl),
-                localUrl = current.baseUrl.takeIf { !it.contains(OLLAMA_HOST) } ?: DEFAULT_LOCAL_URL,
+                localUrl = when {
+                    detectHost(current.baseUrl) == HostChoice.LM_STUDIO ->
+                        ApiCredentials.lmStudioAddressFromUrl(current.baseUrl)
+
+                    current.baseUrl.contains(OLLAMA_HOST, ignoreCase = true) ->
+                        DEFAULT_LOCAL_URL
+
+                    else ->
+                        current.baseUrl
+                },
                 hasSavedKey = current.hasApiKey,
                 selectedModel = current.defaultModel,
                 gitHubSaved = current.hasGitHubToken,
@@ -117,17 +126,37 @@ class OnboardingViewModel @Inject constructor(
      * holds a default (or nothing) — anything the person actually typed is left alone.
      */
     fun setHost(choice: HostChoice) = _uiState.update { state ->
-        val knownDefault = state.localUrl.isBlank() ||
-            state.localUrl == DEFAULT_LOCAL_URL ||
-            state.localUrl == DEFAULT_LM_STUDIO_URL
-        val newUrl = if (knownDefault) {
-            if (choice == HostChoice.LM_STUDIO) DEFAULT_LM_STUDIO_URL else DEFAULT_LOCAL_URL
-        } else {
-            state.localUrl
-        }
-        state.copy(host = choice, localUrl = newUrl, probe = ConnectionProbe.Untried)
-    }
+        val newUrl = when (choice) {
+            HostChoice.CLOUD -> ""
+            HostChoice.LOCAL -> {
+                if (
+                    state.localUrl.isBlank() ||
+                    state.localUrl == DEFAULT_LM_STUDIO_ADDRESS
+                ) {
+                    DEFAULT_LOCAL_URL
+                } else {
+                    state.localUrl
+                }
+            }
 
+            HostChoice.LM_STUDIO -> {
+                if (
+                    state.localUrl.isBlank() ||
+                    state.localUrl == DEFAULT_LOCAL_URL
+                ) {
+                    DEFAULT_LM_STUDIO_ADDRESS
+                } else {
+                    ApiCredentials.lmStudioAddressFromUrl(state.localUrl)
+                }
+            }
+        }
+
+        state.copy(
+            host = choice,
+            localUrl = newUrl,
+            probe = ConnectionProbe.Untried,
+        )
+    }
     fun setLocalUrl(url: String) = _uiState.update {
         it.copy(localUrl = url, probe = ConnectionProbe.Untried)
     }
@@ -160,7 +189,17 @@ class OnboardingViewModel @Inject constructor(
         val state = _uiState.value
         _uiState.update { it.copy(probe = ConnectionProbe.Trying) }
         viewModelScope.launch {
-            val url = if (state.isCloud) ApiCredentials.DEFAULT_BASE_URL else state.localUrl.trim()
+            val url = when {
+                state.isCloud ->
+                    ApiCredentials.DEFAULT_BASE_URL
+
+                state.isLmStudio ->
+                    ApiCredentials.normalizeLmStudioUrl(state.localUrl)
+
+                else ->
+                    state.localUrl.trim()
+            }
+
             settings.setBaseUrl(url)
             if (state.apiKey.isNotBlank()) settings.setApiKey(state.apiKey)
 
@@ -220,9 +259,18 @@ class OnboardingViewModel @Inject constructor(
         val state = _uiState.value
         when (state.step) {
             OnboardingStep.HOST -> viewModelScope.launch {
-                settings.setBaseUrl(
-                    if (state.isCloud) ApiCredentials.DEFAULT_BASE_URL else state.localUrl.trim(),
-                )
+                val url = when {
+                    state.isCloud ->
+                        ApiCredentials.DEFAULT_BASE_URL
+
+                    state.isLmStudio ->
+                        ApiCredentials.normalizeLmStudioUrl(state.localUrl)
+
+                    else ->
+                        state.localUrl.trim()
+                }
+
+                settings.setBaseUrl(url)
             }
             OnboardingStep.KEY -> if (state.apiKey.isNotBlank()) {
                 val key = state.apiKey
@@ -295,4 +343,4 @@ const val DEFAULT_LOCAL_URL = "http://192.168.1.10:11434"
  * for. Like Ollama, a phone cannot reach `localhost` on the computer running LM Studio, so this is
  * a LAN address to be edited rather than one that works unchanged.
  */
-const val DEFAULT_LM_STUDIO_URL = "http://192.168.1.10:1234/v1"
+const val DEFAULT_LM_STUDIO_URL = ""

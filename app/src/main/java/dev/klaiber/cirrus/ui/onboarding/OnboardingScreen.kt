@@ -358,8 +358,8 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
         OutlinedTextField(
             value = state.localUrl,
             onValueChange = viewModel::setLocalUrl,
-            label = { Text("Address") },
-            placeholder = { Text(DEFAULT_LM_STUDIO_URL) },
+            label = { Text("Server address") },
+            placeholder = { Text("192.168.1.10:1234") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             shape = ContainerShape,
@@ -367,10 +367,9 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Your phone cannot reach \"localhost\" either — use the computer's address on " +
-                "your network, keep the \"/v1\" at the end, and turn on \"Serve on Local " +
-                "Network\" next to LM Studio's local server in its Developer tab. Load a model " +
-                "that supports tool calling if you want GitHub, web search or MCP to work.",
+            text = "Enter only the computer's IP address and LM Studio port, for example " +
+                "\"192.168.1.10:1234\". Cirrus adds \"http://\" and \"/v1\" automatically. " +
+                "Turn on \"Serve on Local Network\" in LM Studio's Developer tab.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

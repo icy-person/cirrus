@@ -47,5 +47,63 @@ class ApiCredentials @Inject constructor() {
             }
             return withScheme.trimEnd('/').removeSuffix("/api").trimEnd('/')
         }
+        /**
+         * Converts a user-facing LM Studio address into the actual API URL.
+         *
+         * Accepted:
+         * 127.0.0.1:1234
+         * 192.168.1.10:1234
+         * http://192.168.1.10:1234
+         * http://192.168.1.10:1234/v1
+         */
+
+        fun normalizeLMStudioUrl(raw: String): String{
+            var value = raw.trim();
+
+            if (value.isEmpty()) {
+                return ""
+            }
+
+            value = value
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .trimEnd("/)
+
+            if (value.endsWith("v1" , ignoreCase = true)){
+                value = value.dropLast(3).trimEnd("/")
+            }
+
+            return "http://$value/v1"
+
+        }
+
+        /**
+         * Converts a stored LM Studio URL back into the value shown in the UI.
+         *
+         * http://192.168.1.10:1234/v1
+         * -> 192.168.1.10:1234
+         */
+
+         fun LMStudioAddress(raw: String): String {
+            var value = raw.trim();
+
+            if (value.isEmpty()){
+                return ""
+            }
+
+            value = value
+                .removePrefix("http://")
+                .removePrefix("https://")
+                .trimEnd('/')
+
+            if (value.endsWith("/v1", ignoreCase = true)) {
+                value = value.dropLast(3).trimEnd('/')
+            }
+
+            return value
+
+
+         }
+
     }
 }
