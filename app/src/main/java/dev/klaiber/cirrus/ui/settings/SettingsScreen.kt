@@ -8,11 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -81,14 +78,23 @@ import dev.klaiber.cirrus.ui.components.Hairline
 import dev.klaiber.cirrus.ui.components.OutlinedPanel
 import dev.klaiber.cirrus.ui.theme.ContainerShape
 import dev.klaiber.cirrus.ui.theme.LargeContainerShape
-import dev.klaiber.cirrus.ui.theme.Pill
 
+/**
+ * The settings hub.
+ *
+ * Eight groups and two destinations, instead of one scroll of thirty controls. The old screen was
+ * ordered by when each setting was written, so finding the context-window slider meant reading past
+ * the GitHub token. Grouping costs one tap and buys a screen you can scan — and it leaves an
+ * obvious place to put the next thing, which is how the old one got that long.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenSection: (SettingsSection) -> Unit,
-    section: SettingsSection,
+    onOpenMemory: () -> Unit,
+    onOpenAgents: () -> Unit,
+    onRunSetup: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -96,13 +102,256 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 40.dp),
+        ) {
+            ConnectionSummary(
+                hasKey = state.settings.hasApiKey,
+                host = state.settings.baseUrl,
+                model = state.settings.defaultModel,
+                onClick = { onOpenSection(SettingsSection.CONNECTION) },
+            )
+
+            SectionLabel("What Cirrus knows")
+            HubCard {
+                HubRow(
+                    icon = SettingsDestination.MEMORY.icon,
+                    title = SettingsDestination.MEMORY.title,
+                    summary = if (state.memoryCount > 0) {
+                        "${state.memoryCount} remembered"
+                    } else {
+                        SettingsDestination.MEMORY.summary
+                    },
+                    onClick = onOpenMemory,
+                )
+                HubDivider()
+                HubRow(
+                    icon = SettingsDestination.AGENTS.icon,
+                    title = SettingsDestination.AGENTS.title,
+                    summary = if (state.agentCount > 0) {
+                        "${state.agentCount} scheduled"
+                    } else {
+                        SettingsDestination.AGENTS.summary
+                    },
+                    onClick = onOpenAgents,
+                )
+            }
+
+            SectionLabel("Settings")
+            HubCard {
+                SettingsSection.entries.forEachIndexed { index, section ->
+                    if (index > 0) HubDivider()
+                    HubRow(
+                        icon = section.icon,
+                        title = section.title,
+                        summary = section.summary,
+                        onClick = { onOpenSection(section) },
+                    )
+                }
+            }
+
+            SectionLabel("Getting set up")
+            HubCard {
+                // The wizard is where the connection is proved rather than merely typed, which
+                // makes it the right answer to "it stopped working" as well as to "I am new here".
+                HubRow(
+                    icon = Icons.Outlined.AutoAwesome,
+                    title = "Run setup again",
+                    summary = "Walk through the host, key and model, and test the connection",
+                    onClick = onRunSetup,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Text(
+                text = "Cirrus ${state.versionName}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** The one thing worth showing without a tap: whether Cirrus can reach a model at all. */
+@Composable
+private fun ConnectionSummary(hasKey: Boolean, host: String, model: String, onClick: () -> Unit) {
+    val connected = hasKey || !host.contains("ollama.com")
+
+    // Connected is the ordinary case, so it gets the ordinary treatment: an outlined row like every
+    // other. Only the failure is tinted. A green-equivalent "all is well" panel spends the reader's
+    // attention on the state that needed none of it.
+    OutlinedPanel(
+        onClick = onClick,
+        shape = LargeContainerShape,
+        color = if (connected) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.errorContainer
+        },
+        borderColor = if (connected) {
+            MaterialTheme.colorScheme.outlineVariant
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+    ) {
+        val onContainer = if (connected) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onErrorContainer
+        }
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (connected) {
+                    Icons.Outlined.CheckCircle
+                } else {
+                    Icons.Outlined.ErrorOutline
+                },
+                contentDescription = null,
+                tint = onContainer,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = if (connected) "Connected" else "No API key yet",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = onContainer,
+                )
+                Text(
+                    text = buildString {
+                        append(host.removePrefix("https://").removePrefix("http://"))
+                        if (model.isNotBlank()) append(" · ").append(model)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (connected) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        onContainer
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** A group of rows as one bordered object, hairline-separated — the reference site's list idiom. */
+@Composable
+private fun HubCard(content: @Composable ColumnScope.() -> Unit) {
+    OutlinedPanel(shape = LargeContainerShape, modifier = Modifier.fillMaxWidth()) {
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun HubDivider() {
+    Hairline(startIndent = 56.dp)
+}
+
+@Composable
+private fun HubRow(icon: ImageVector, title: String, summary: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/**
+ * One group of controls, on its own screen.
+ *
+ * Every control here is the one that was already there; only where it lives has changed.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsSectionScreen(
+    section: SettingsSection,
+    onBack: () -> Unit,
+    onOpenMcpServers: () -> Unit,
+    onOpenSkills: () -> Unit,
+    /** Asks Android for the location permission, then reports what it said. */
+    onLocationToggle: (Boolean) -> Unit = {},
+    onSpotifyConnect: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val voices by viewModel.voices.collectAsStateWithLifecycle()
+    val voiceStatus by viewModel.voiceStatus.collectAsStateWithLifecycle()
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
                 title = { Text(section.title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = "Back",
+                        )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
         },
     ) { innerPadding ->
@@ -119,7 +368,6 @@ fun SettingsScreen(
 
                 ApiKeyField(
                     hasKey = state.settings.hasApiKey,
-                    isLmStudio = state.settings.baseUrl.trimEnd('/').endsWith("/v1", ignoreCase = true),
                     status = state.connectionStatus,
                     onSave = viewModel::saveApiKey,
                     onClear = viewModel::clearApiKey,
@@ -142,107 +390,1296 @@ fun SettingsScreen(
                     models = state.models.map { it.name },
                     onSelect = viewModel::setDefaultModel,
                 )
-
-                Spacer(Modifier.height(12.dp))
-                GenerationDefaults(
-                    params = state.settings.defaultParams,
-                    onSave = viewModel::setDefaultParams,
-                )
-
-                Spacer(Modifier.height(12.dp))
-                ToolDefaults(
-                    enabled = state.settings.toolsEnabledByDefault,
-                    onChange = viewModel::setToolsEnabledByDefault,
-                    maxIterations = state.settings.maxToolIterations,
-                    onMaxIterationsChange = viewModel::setMaxToolIterations,
-                )
-
-                Spacer(Modifier.height(12.dp))
-                contextLimit = state.settings.contextMessageLimit,
-                onContextLimitChange = viewModel::setContextMessageLimit,
-                )
-
-                Spacer(Modifier.height(12.dp))
                 SwitchRow(
-                    label = "Show statistics",
-                    checked = state.settings.showStats,
-                    onCheckedChange = viewModel::setShowStats,
+                    title = "Web tools by default",
+                    subtitle = "Enable web search and page fetch for new conversations",
+                    help = "Lets the model run web searches and fetch pages mid-answer. It decides " +
+                        "when to call them, and each call is an extra round trip to your host. You " +
+                        "can still flip this per conversation from the composer.",
+                    checked = state.settings.toolsEnabledByDefault,
+                    onCheckedChange = viewModel::setToolsDefault,
                 )
-
-                Spacer(Modifier.height(12.dp))
                 SwitchRow(
-                    label = "Render Markdown",
-                    checked = state.settings.renderMarkdown,
-                    onCheckedChange = viewModel::setRenderMarkdown,
+                    title = "Auto-title conversations",
+                    subtitle = "Name threads from their content, and keep the name current",
+                    help = "Cirrus names a new thread from its first exchange, then re-summarises " +
+                        "it as the conversation grows — at most once every 30 minutes, so a long " +
+                        "session costs a handful of short requests rather than one per turn. " +
+                        "Rename a thread yourself and it is never overwritten.",
+                    checked = state.settings.autoTitleConversations,
+                    onCheckedChange = viewModel::setAutoTitle,
                 )
-
-                Spacer(Modifier.height(12.dp))
                 SwitchRow(
-                    label = "Send on Enter",
-                    checked = state.settings.sendOnEnter,
-                    onCheckedChange = viewModel::setSendOnEnter,
-                )
-
-                Spacer(Modifier.height(12.dp))
-                SwitchRow(
-                    label = "Show starter prompts",
+                    title = "Suggested openers",
+                    subtitle = "Four things to try on an empty conversation",
+                    help = "A blank composer asks a question it does not answer. The suggestions " +
+                        "are matched to what you have switched on — nothing offers to read your " +
+                        "repositories unless a GitHub token is configured. Turn them off once " +
+                        "you know what you want to type.",
                     checked = state.settings.showStarterPrompts,
                     onCheckedChange = viewModel::setShowStarterPrompts,
                 )
-
-                Spacer(Modifier.height(12.dp))
                 SwitchRow(
-                    label = "Developer mode",
-                    checked = state.settings.developerMode,
-                    onCheckedChange = viewModel::setDeveloperMode,
+                    title = "Send on enter",
+                    subtitle = "Otherwise enter inserts a newline and you tap send",
+                    help = "Turns the keyboard's return key into send. Handy for short back-and-forth " +
+                        "chats, awkward when you write multi-line prompts.",
+                    checked = state.settings.sendOnEnter,
+                    onCheckedChange = viewModel::setSendOnEnter,
                 )
+                StepperRow(
+                    title = "Context messages",
+                    subtitle = if (state.settings.contextMessageLimit == 0) {
+                        "Sending the full thread every turn"
+                    } else {
+                        "Sending the last ${state.settings.contextMessageLimit} messages"
+                    },
+                    help = "How much of the thread is replayed with every turn. A smaller number " +
+                        "means cheaper, faster requests but a shorter memory: the model literally " +
+                        "cannot see what fell outside the window. \"All\" sends everything and lets " +
+                        "the model's own context window do the truncating.",
+                    value = state.settings.contextMessageLimit.toFloat(),
+                    range = 0f..100f,
+                    steps = 19,
+                    format = { if (it.toInt() == 0) "all" else it.toInt().toString() },
+                    onChange = { viewModel.setContextMessageLimit(it.toInt()) },
+                )
+
+            
                 }
 
                 SettingsSection.INTEGRATIONS -> {
-                IntegrationSummary(
-                    github = state.settings.hasGitHubToken,
-                    elevenLabs = state.settings.hasElevenLabsKey,
-                    spotify = state.settings.hasSpotifyAccount,
-                    mcpServers = state.mcpServerCount,
-                    mcpTools = state.mcpToolCount,
-                    skills = state.activeSkillCount,
-                    memories = state.memoryCount,
-                    agents = state.agentCount,
+
+                GitHubTokenField(
+                    hasToken = state.settings.hasGitHubToken,
+                    onSave = viewModel::saveGitHubToken,
+                    onClear = viewModel::clearGitHubToken,
+                )
+                SwitchRow(
+                    title = "GitHub tools",
+                    subtitle = "Let the model read your repositories, issues and pull requests",
+                    help = "Adds tools the model can call mid-answer: list repositories, search " +
+                        "code, read files, and read issues and pull requests — private ones " +
+                        "included, as far as your token reaches. Requests go to api.github.com and " +
+                        "nowhere else, and your Ollama key is never sent there.",
+                    checked = state.settings.gitHubToolsEnabled,
+                    onCheckedChange = viewModel::setGitHubToolsEnabled,
+                    enabled = state.settings.hasGitHubToken,
+                )
+                Text(
+                    text = "Write actions — opening issues, commenting, committing — are governed " +
+                        "by one switch for every integration, at Settings → Tools → Allow write " +
+                        "actions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                )
+
+            
+
+                NavigationRow(
+                    title = "MCP servers",
+                    subtitle = mcpSubtitle(state.mcpServerCount, state.mcpToolCount),
+                    help = "Attach a Model Context Protocol server and its tools become available " +
+                        "to the model alongside Cirrus's own. Each server is reached and asked what " +
+                        "it offers before it is saved, and its token is only ever sent to it.",
+                    onClick = onOpenMcpServers,
+                )
+
+            
+                }
+
+                SettingsSection.SKILLS -> {
+
+                SwitchRow(
+                    title = "Use skills",
+                    subtitle = "Offer the model the skills you have installed",
+                    help = "A skill is a page of instructions for one kind of job, published to " +
+                        "the public library at skills.sh and installed here. The model sees only " +
+                        "the names and one-line descriptions until it picks one, so an installed " +
+                        "skill costs almost nothing until the moment it is the right one. " +
+                        "Installing needs the network; using one does not.",
+                    checked = state.settings.skillsEnabled,
+                    onCheckedChange = viewModel::setSkillsEnabled,
+                )
+
+                NavigationRow(
+                    title = "Your skills",
+                    subtitle = skillsSubtitle(state.skillCount, state.activeSkillCount),
+                    help = "What is installed, with a switch each. Turning one off keeps it here " +
+                        "but takes it out of what the model is told about — which is the useful " +
+                        "state for a skill you want back next month. The same screen opens the " +
+                        "library, where there are thousands more.",
+                    onClick = onOpenSkills,
+                )
+
+                }
+
+                SettingsSection.MUSIC -> {
+
+                SpotifyPanel(
+                    settings = state.settings,
+                    onClientId = viewModel::setSpotifyClientId,
+                    onEnabled = viewModel::setSpotifyEnabled,
+                    onConnect = onSpotifyConnect,
+                    onDisconnect = viewModel::disconnectSpotify,
                 )
                 }
 
                 SettingsSection.VOICE -> {
-                VoiceSection(
-                    settings = state.settings,
-                    voices = state.voices,
-                    voiceStatus = state.voiceStatus,
-                    onSaveKey = viewModel::saveElevenLabsKey,
-                    onClearKey = viewModel::clearElevenLabsKey,
-                    onLoadVoices = viewModel::loadElevenLabsVoices,
-                    onSetVoice = viewModel::setElevenLabsVoice,
-                    onSetModel = viewModel::setElevenLabsModel,
-                    onSetMode = viewModel::setReadAloudMode,
-                    onSetEngine = viewModel::setSpeechEngine,
+
+                SwitchRow(
+                    title = "Voice input",
+                    subtitle = "Show a microphone in the composer",
+                    help = "Dictate instead of typing. Android's speech recogniser transcribes what " +
+                        "you say straight into the message box, where you can edit it before " +
+                        "sending. Ollama's chat API carries no audio field, so what reaches the " +
+                        "model is the transcript, not the recording.",
+                    checked = state.settings.voiceInputEnabled,
+                    onCheckedChange = viewModel::setVoiceInputEnabled,
+                )
+                SwitchRow(
+                    title = "Keep dictation on device",
+                    subtitle = "Use the offline recogniser when one is installed",
+                    help = "Prefers Android's on-device recogniser, so your voice never leaves the " +
+                        "phone. If the device has no offline model for your language, Cirrus falls " +
+                        "back to the network recogniser. Needs Android 13 or newer.",
+                    checked = state.settings.preferOnDeviceRecognition,
+                    onCheckedChange = viewModel::setPreferOnDeviceRecognition,
+                    enabled = state.settings.voiceInputEnabled,
+                )
+                SwitchRow(
+                    title = "Read answers aloud",
+                    subtitle = "Show a speak button under finished replies",
+                    help = "Adds a control that reads a reply out. What gets spoken is not the raw " +
+                        "markdown: code blocks are announced rather than dictated, links are read as " +
+                        "\"link\", tables are read as heading-and-value pairs, and maths is spoken as " +
+                        "words — x squared, not x two.",
+                    checked = state.settings.readAloudEnabled,
+                    onCheckedChange = viewModel::setReadAloudEnabled,
+                )
+                if (state.settings.readAloudEnabled) {
+                    ReadAloudModeSelector(
+                        selected = state.settings.readAloudMode,
+                        onSelect = viewModel::setReadAloudMode,
+                    )
+                    SpeechEngineSelector(
+                        selected = state.settings.speechEngine,
+                        onSelect = viewModel::setSpeechEngine,
+                    )
+                    if (state.settings.speechEngine == SpeechEngine.ELEVENLABS) {
+                        ElevenLabsKeyField(
+                            hasKey = state.settings.hasElevenLabsKey,
+                            onSave = viewModel::saveElevenLabsKey,
+                            onClear = viewModel::clearElevenLabsKey,
+                        )
+                        if (state.settings.hasElevenLabsKey) {
+                            VoicePicker(
+                                selectedName = state.settings.elevenLabsVoiceName,
+                                voices = voices,
+                                status = voiceStatus,
+                                onLoad = viewModel::loadVoices,
+                                onSelect = viewModel::setElevenLabsVoice,
+                            )
+                            ElevenLabsModelPicker(
+                                selected = ElevenLabsModel.fromId(state.settings.elevenLabsModelId),
+                                onSelect = viewModel::setElevenLabsModel,
+                            )
+                        }
+                    }
+                }
+
+            
+                }
+
+                SettingsSection.APPEARANCE -> {
+
+                ThemeSelector(
+                    selected = state.settings.themeMode,
+                    onSelect = viewModel::setThemeMode,
+                )
+                SwitchRow(
+                    title = "Render markdown",
+                    subtitle = "Turn off to read raw model output verbatim",
+                    help = "Formats replies: headings, lists, tables, and syntax-highlighted code " +
+                        "blocks. Off shows exactly the characters the model produced, asterisks and " +
+                        "backticks included — useful when you are debugging a prompt's formatting.",
+                    checked = state.settings.renderMarkdown,
+                    onCheckedChange = viewModel::setRenderMarkdown,
+                )
+
+            
+                }
+
+                SettingsSection.DIAGNOSTICS -> {
+
+                SwitchRow(
+                    title = "Show generation stats",
+                    subtitle = "Tokens per second, token counts and latency under each reply",
+                    help = "Adds a line under each reply with output speed, prompt and response " +
+                        "token counts, and time to the first token. The numbers come from the " +
+                        "server's own timings, so they measure the host, not your connection.",
+                    checked = state.settings.showStats,
+                    onCheckedChange = viewModel::setShowStats,
+                )
+                SwitchRow(
+                    title = "Developer mode",
+                    subtitle = "Capture and display the exact request JSON for every turn",
+                    help = "Stores the exact JSON body sent for each turn and shows it under the " +
+                        "reply — system prompt, context window, options and tool definitions " +
+                        "included. Nothing extra is sent; it only records what already went out.",
+                    checked = state.settings.developerMode,
+                    onCheckedChange = viewModel::setDeveloperMode,
+                )
+
+            
+                }
+
+                SettingsSection.TOOLS -> {
+
+                SwitchRow(
+                    title = "Shell and everyday tools",
+                    subtitle = "The clock, the calendar, this phone's details, and safe commands",
+                    help = "Gives the model four things it otherwise has to guess at: what the " +
+                        "date and time are, how a month is laid out, what this phone is, and a " +
+                        "shell for the small mechanical jobs — counting, sorting, checksums. The " +
+                        "shell runs in a scratch folder inside Cirrus's own cache and can reach " +
+                        "nothing outside it: absolute paths, \"..\" and command substitution are " +
+                        "refused before anything runs, and only a fixed list of programs is " +
+                        "allowed at all. Nothing here touches the network, so it is offered " +
+                        "whatever the per-conversation tools switch says.",
+                    checked = state.settings.shellToolsEnabled,
+                    onCheckedChange = viewModel::setShellToolsEnabled,
+                )
+                ScratchpadRetentionSelector(
+                    selected = state.settings.scratchpadRetention,
+                    onSelect = viewModel::setScratchpadRetention,
+                )
+                SwitchRow(
+                    title = "Apps and media",
+                    subtitle = "List what is installed, open an app, control what is playing",
+                    help = "Off by default, because these are the local tools that act rather " +
+                        "than answer — opening an app puts it in front of whatever you were " +
+                        "reading, and the media controls make noise. Installing is not something " +
+                        "it can do by itself: the most it manages is opening a store page, where " +
+                        "Android asks you, as it always does. The media controls use Android's " +
+                        "own play/pause buttons, so they work with any player and need no Spotify " +
+                        "Premium.",
+                    checked = state.settings.appControlEnabled,
+                    onCheckedChange = viewModel::setAppControlEnabled,
+                )
+                SwitchRow(
+                    title = "Location",
+                    subtitle = "Roughly where you are, for weather and anything local",
+                    help = "Off by default. Turning it on asks Android for permission, and Cirrus " +
+                        "asks only for the coarse kind — roughly your neighbourhood, never your " +
+                        "doorstep — because that answers every question this is for. It is read " +
+                        "only when the model calls for it, never in the background, and never by " +
+                        "a scheduled agent while you are asleep.",
+                    checked = state.settings.locationEnabled,
+                    onCheckedChange = onLocationToggle,
+                )
+                SwitchRow(
+                    title = "Memory",
+                    subtitle = "Remember things about you between conversations",
+                    help = "Lets the model save durable facts — how you like to work, what you " +
+                        "are building, who people are — and look them up later. Everything it " +
+                        "keeps is on the Memory screen, where you can read, edit or retire any " +
+                        "of it. Nothing leaves the phone.",
+                    checked = state.settings.memoryEnabled,
+                    onCheckedChange = viewModel::setMemoryEnabled,
+                )
+                SwitchRow(
+                    title = "Nightly memory tidy-up",
+                    subtitle = "Merge duplicates and retire what has been superseded, while you sleep",
+                    help = "Once a night, Cirrus reads the conversations you have had since the " +
+                        "last pass, harvests anything durable, then merges near-duplicate " +
+                        "memories and retires ones that have been overtaken. Nothing is deleted — " +
+                        "retiring is archiving, and the Memory screen restores anything.",
+                    checked = state.settings.memoryConsolidationEnabled,
+                    onCheckedChange = viewModel::setMemoryConsolidationEnabled,
+                    enabled = state.settings.memoryEnabled,
+                )
+                SwitchRow(
+                    title = "Notifications",
+                    subtitle = "Let a reply reach you when you are not looking at Cirrus",
+                    help = "Mostly for scheduled agents: an answer written at 3am is worthless if " +
+                        "nobody knows it exists. In an ordinary chat the model is told not to " +
+                        "notify you about something you are already reading.",
+                    checked = state.settings.notificationToolEnabled,
+                    onCheckedChange = viewModel::setNotificationToolEnabled,
+                )
+                SwitchRow(
+                    title = "Allow write actions",
+                    subtitle = "One switch for anything that changes something outside Cirrus",
+                    help = "Off by default, and worth leaving off. It governs every integration " +
+                        "at once: opening a GitHub issue, committing a file, editing a Spotify " +
+                        "playlist, and any MCP tool that has not declared itself read-only. " +
+                        "Reading is recoverable and writing is not, and a tool call is decided by " +
+                        "a model rather than by you. With this off those tools are not offered at " +
+                        "all, so nothing can try and fail — everything read-only still works.",
+                    checked = state.settings.writeToolsAllowed,
+                    onCheckedChange = viewModel::setWriteToolsAllowed,
+                )
+                StepperRow(
+                    title = "Search results",
+                    subtitle = "How many results web_search returns per call",
+                    help = "More results give the model more to work with, but each one is pasted " +
+                        "into the conversation and eats context the model could be using to think.",
+                    value = state.settings.webSearchMaxResults.toFloat(),
+                    range = 1f..10f,
+                    steps = 8,
+                    format = { it.toInt().toString() },
+                    onChange = { viewModel.setWebSearchMaxResults(it.toInt()) },
+                )
+                StepperRow(
+                    title = "Max tool rounds",
+                    subtitle = "Upper bound on back-and-forth tool calls in one turn",
+                    help = "A model can search, read the results, then search again. This caps how " +
+                        "many of those rounds one turn may take before Cirrus stops the loop, so a " +
+                        "model that keeps searching forever cannot run up your bill.",
+                    value = state.settings.maxToolIterations.toFloat(),
+                    range = 1f..20f,
+                    steps = 18,
+                    format = { it.toInt().toString() },
+                    onChange = { viewModel.setMaxToolIterations(it.toInt()) },
                 )
                 }
 
-                SettingsSection.MCP -> {
-                McpSection(
-                    serverCount = state.mcpServerCount,
-                    toolCount = state.mcpToolCount,
-                )
-                }
+                SettingsSection.DATA -> {
 
-                SettingsSection.ABOUT -> {
-                AboutSection(versionName = state.versionName)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showDeleteDialog = true }
+                        .padding(vertical = 14.dp),
+                ) {
+                    Column {
+                        Text(
+                            text = "Delete all conversations",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            text = "Everything is stored on this device only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+                }
+            }
+        }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete everything?") },
+            text = { Text("All conversations and messages will be permanently removed from this device.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteAllConversations()
+                        showDeleteDialog = false
+                    },
+                ) {
+                    Text("Delete all", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Spacer(Modifier.height(24.dp))
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(Modifier.height(8.dp))
+}
+
+/**
+ * Which engine speaks.
+ *
+ * Both are always offered, even without a key: seeing that ElevenLabs exists is how anyone
+ * discovers they can have a voice that does not sound like a satnav. Picking it reveals the key
+ * field rather than nagging beforehand.
+ */
+/**
+ * How much of an answer is spoken.
+ *
+ * Placed above the engine picker because it is the larger decision: which voice reads it matters
+ * only once you have settled what it is reading.
+ */
+/**
+ * When the shell's scratch files are cleared, if ever.
+ *
+ * A segmented row rather than a menu: four options, all short, and the choice is one people make
+ * once — a dropdown would hide the fact that "never" is even available, which is the option most
+ * people want and the one they would not think to go looking for.
+ */
+@Composable
+private fun ScratchpadRetentionSelector(
+    selected: ScratchpadRetention,
+    onSelect: (ScratchpadRetention) -> Unit,
+) {
+    Column(Modifier.padding(vertical = 8.dp)) {
+        LabelWithHelp(
+            label = "Clear scratch files after",
+            help = "Files written by shell commands live in a scratch folder per conversation, and " +
+                "you can see them under Files in a chat's menu. This is when Cirrus " +
+                "clears them for you. Never is the default: they are your work once you " +
+                "can see them, and deleting somebody's work on a timer they did not set " +
+                "is a poor thing to do quietly. Whatever this says, a scratchpad whose " +
+                "conversation you have deleted goes with it, and a total size cap still " +
+                "applies as a last resort so a runaway command cannot fill the phone.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ScratchpadRetention.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = option == selected,
+                    onClick = { onSelect(option) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index,
+                        ScratchpadRetention.entries.size,
+                    ),
+                    label = { Text(option.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReadAloudModeSelector(selected: ReadAloudMode, onSelect: (ReadAloudMode) -> Unit) {
+    Column(Modifier.padding(vertical = 8.dp)) {
+        LabelWithHelp(
+            label = "How much to read",
+            help = "Speech is linear: a written answer you would skim in twenty seconds is six " +
+                "minutes read out, and there is no way to skip the part you did not need. " +
+                "A spoken summary is a minute or so on what the answer concluded and why, " +
+                "written for the ear by the model you are already using. Short answers are " +
+                "read in full either way, and the written answer never changes.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ReadAloudMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = mode == selected,
+                    onClick = { onSelect(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ReadAloudMode.entries.size),
+                    label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun SpeechEngineSelector(selected: SpeechEngine, onSelect: (SpeechEngine) -> Unit) {
+    Column(Modifier.padding(vertical = 8.dp)) {
+        LabelWithHelp(
+            label = "Voice engine",
+            help = "The device engine is free, works offline and is installed already. " +
+                "ElevenLabs sounds dramatically better and is worth it for long answers, but " +
+                "every sentence spoken costs characters from your account there. Cirrus falls " +
+                "back to the device engine whenever the key is missing.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SpeechEngine.entries.forEachIndexed { index, engine ->
+                SegmentedButton(
+                    selected = engine == selected,
+                    onClick = { onSelect(engine) },
+                    shape = SegmentedButtonDefaults.itemShape(index, SpeechEngine.entries.size),
+                    label = { Text(engine.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun ElevenLabsKeyField(hasKey: Boolean, onSave: (String) -> Unit, onClear: () -> Unit) {
+    var draft by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+
+    Column(Modifier.padding(top = 8.dp)) {
+        LabelWithHelp(
+            label = "ElevenLabs API key",
+            help = "From elevenlabs.io/app/settings/api-keys. Stored on this device only, " +
+                "encrypted with the same device-bound key as everything else here, and sent " +
+                "only to api.elevenlabs.io — never to Ollama, and your Ollama key is never sent " +
+                "to ElevenLabs.",
+        )
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text(if (hasKey) "Replace key" else "ElevenLabs key") },
+            placeholder = { Text("sk_…") },
+            singleLine = true,
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        imageVector = if (visible) {
+                            Icons.Outlined.VisibilityOff
+                        } else {
+                            Icons.Outlined.Visibility
+                        },
+                        contentDescription = if (visible) "Hide key" else "Show key",
+                    )
+                }
+            },
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    onSave(draft)
+                    draft = ""
+                },
+                enabled = draft.isNotBlank(),
+            ) {
+                Text("Save key")
+            }
+            if (hasKey) {
+                TextButton(onClick = onClear) { Text("Remove") }
+            }
+        }
+        if (!hasKey) {
+            Text(
+                text = "Without a key, read-aloud quietly uses the device engine instead.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoicePicker(
+    selectedName: String,
+    voices: List<ElevenLabsVoice>,
+    status: VoiceStatus,
+    onLoad: () -> Unit,
+    onSelect: (ElevenLabsVoice) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.padding(top = 12.dp)) {
+        LabelWithHelp(
+            label = "Voice",
+            help = "Every voice on your ElevenLabs account, including ones you cloned or made " +
+                "yourself. Cirrus uses the default voice until you pick one.",
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ContainerShape)
+                .clickable {
+                    if (voices.isEmpty()) onLoad() else expanded = true
+                }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = selectedName.ifBlank { "Default voice" },
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            if (status == VoiceStatus.Loading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text(
+                    text = if (voices.isEmpty()) "Load voices" else "Change",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            voices.forEach { voice ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(voice.name)
+                            voice.description?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    onClick = {
+                        onSelect(voice)
+                        expanded = false
+                    },
+                )
+            }
+        }
+        (status as? VoiceStatus.Failure)?.let {
+            Text(
+                text = it.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ElevenLabsModelPicker(
+    selected: ElevenLabsModel,
+    onSelect: (ElevenLabsModel) -> Unit,
+) {
+    Column(Modifier.padding(top = 12.dp)) {
+        LabelWithHelp(
+            label = "Synthesis model",
+            help = "How the audio is made. Flash starts talking soonest, which is what matters " +
+                "when you are waiting to hear an answer; the others sound better but keep you " +
+                "waiting longer before the first word.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ElevenLabsModel.entries.forEachIndexed { index, model ->
+                SegmentedButton(
+                    selected = model == selected,
+                    onClick = { onSelect(model) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ElevenLabsModel.entries.size),
+                    label = { Text(model.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+        Text(
+            text = selected.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun ApiKeyField(
+    hasKey: Boolean,
+    status: ConnectionStatus,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    onTest: () -> Unit,
+) {
+    var draft by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+
+    Column {
+        LabelWithHelp(
+            label = "API key",
+            help = "Your Ollama API key, needed for the hosted API at ollama.com. It is stored " +
+                "only on this device, encrypted with a key that lives in the Android Keystore " +
+                "and never leaves it. A local Ollama instance usually needs no key at all.",
+        )
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text(if (hasKey) "Replace API key" else "Ollama API key") },
+            placeholder = { Text("ollama api key") },
+            singleLine = true,
+            // The key is a secret: masked by default, revealable for typo-checking.
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        imageVector = if (visible) {
+                            Icons.Outlined.VisibilityOff
+                        } else {
+                            Icons.Outlined.Visibility
+                        },
+                        contentDescription = if (visible) "Hide key" else "Show key",
+                    )
+                }
+            },
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    onSave(draft)
+                    draft = ""
+                },
+                enabled = draft.isNotBlank(),
+            ) {
+                Text("Save key")
+            }
+            OutlinedButton(onClick = onTest, enabled = hasKey) { Text("Test") }
+            if (hasKey) {
+                TextButton(onClick = onClear) { Text("Remove") }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        ConnectionStatusRow(hasKey = hasKey, status = status)
+    }
+}
+
+@Composable
+private fun ConnectionStatusRow(hasKey: Boolean, status: ConnectionStatus) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        when (status) {
+            ConnectionStatus.Idle -> Text(
+                text = if (hasKey) {
+                    "A key is stored, encrypted with a device-bound key."
+                } else {
+                    "Create one at ollama.com/settings/keys."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            ConnectionStatus.Testing -> {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = "Testing…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            is ConnectionStatus.Success -> {
+                Icon(
+                    imageVector = Icons.Outlined.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(15.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    text = "Connected — reached ${status.model}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            is ConnectionStatus.Failure -> {
+                Icon(
+                    imageVector = Icons.Outlined.ErrorOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(15.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    text = status.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
 }
 
-private fun ConnectionSummary(hasKey: Boolean, host: String, model: String, onClick: () -> Unit) {
-    val connected = hasKey || !host.contains("ollama.com")
+@Composable
+private fun GitHubTokenField(
+    hasToken: Boolean,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    var draft by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+
+    Column {
+        LabelWithHelp(
+            label = "Personal access token",
+            help = "A fine-grained or classic GitHub token. Classic tokens need the `repo` " +
+                "scope to reach private repositories; a fine-grained token needs read access " +
+                "to Contents, Issues and Pull requests, plus write on those you want the model " +
+                "to be able to change. Create one at github.com/settings/tokens. It is stored " +
+                "on this device only, encrypted with a device-bound key.",
+        )
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text(if (hasToken) "Replace token" else "GitHub token") },
+            placeholder = { Text("github_pat_… or ghp_…") },
+            singleLine = true,
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        imageVector = if (visible) {
+                            Icons.Outlined.VisibilityOff
+                        } else {
+                            Icons.Outlined.Visibility
+                        },
+                        contentDescription = if (visible) "Hide token" else "Show token",
+                    )
+                }
+            },
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    onSave(draft)
+                    draft = ""
+                },
+                enabled = draft.isNotBlank(),
+            ) {
+                Text("Save token")
+            }
+            if (hasToken) {
+                TextButton(onClick = onClear) { Text("Remove") }
+            }
+        }
+
+        Text(
+            text = if (hasToken) {
+                "A token is stored, encrypted with a device-bound key."
+            } else {
+                "Without a token the GitHub tools stay hidden from the model."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
 }
 
-// ...
+@Composable
+private fun BaseUrlField(baseUrl: String, onSave: (String) -> Unit) {
+    var draft by remember(baseUrl) { mutableStateOf(baseUrl) }
+
+    Column {
+        LabelWithHelp(
+            label = "Host",
+            help = "Where every request goes. Use https://ollama.com for the hosted API, or " +
+                "http://<address>:11434 for an Ollama instance on your own machine — your " +
+                "hardware, your models, no key. A trailing /api is stripped automatically.",
+        )
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text("Host") },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = "Point at a local instance (http://10.0.2.2:11434) to use your own hardware.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        if (draft != baseUrl) {
+            Spacer(Modifier.height(6.dp))
+            Button(onClick = { onSave(draft) }) { Text("Apply host") }
+        }
+    }
+}
+
+@Composable
+private fun ModelDropdownRow(
+    selected: String,
+    models: List<String>,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Default model", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = selected.ifBlank { "Not set" },
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HelpBadge(
+                title = "Default model",
+                text = "The model new conversations start with. Existing threads keep whatever " +
+                    "they were created with, so changing this never rewrites your history. Pick " +
+                    "per conversation from the model name in the title bar.",
+            )
+        }
+        if (expanded) {
+            Column(Modifier.padding(bottom = 8.dp)) {
+                models.forEach { model ->
+                    Text(
+                        text = model,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        color = if (model == selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelect(model)
+                                expanded = false
+                            }
+                            .padding(vertical = 10.dp, horizontal = 8.dp),
+                    )
+                }
+                if (models.isEmpty()) {
+                    Text(
+                        text = "No models loaded yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+            }
+        }
+        HorizontalDivider()
+    }
+}
+
+@Composable
+private fun ThemeSelector(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+    Column {
+        LabelWithHelp(
+            label = "Theme",
+            help = "\"Follow system\" tracks Android's own light/dark setting, including any " +
+                "schedule or battery-saver rule you have set. The other two pin Cirrus " +
+                "regardless of what the rest of the phone is doing.",
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ThemeMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = selected == mode,
+                    onClick = { onSelect(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                    label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+        }
+    }
+}
+
+/** Caption above a field, with the question mark that explains it. */
+@Composable
+private fun LabelWithHelp(label: String, help: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(bottom = 4.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        HelpBadge(title = label, text = help)
+    }
+}
+
+/**
+ * A setting with its own explanation.
+ *
+ * [subtitle] says what the switch does in a handful of words; [help] is the paragraph behind the
+ * question mark, for the "…but what does that actually change?" question the subtitle cannot
+ * answer without turning the list into an essay.
+ */
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    help: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    val contentAlpha = if (enabled) 1f else DISABLED_ALPHA
+
+    HelpTooltip(title = title, text = help) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) { onCheckedChange(!checked) }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                )
+            }
+            HelpBadge(title = title, text = help)
+            Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+        }
+    }
+}
+
+/** A row that leads somewhere else, rather than changing something in place. */
+@Composable
+private fun NavigationRow(
+    title: String,
+    subtitle: String,
+    help: String,
+    onClick: () -> Unit,
+) {
+    HelpTooltip(title = title, text = help) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HelpBadge(title = title, text = help)
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Says what attaching servers has actually bought you, which is a tool count, not a server count. */
+/**
+ * "Three installed, two in use".
+ *
+ * Both numbers, because they answer different questions and the second is the one that matters:
+ * only the switched-on skills are named to the model, so a library of ten with two enabled behaves
+ * exactly like a library of two.
+ */
+private fun skillsSubtitle(installed: Int, active: Int): String = when {
+    installed == 0 -> "None installed — browse the library"
+    active == installed && installed == 1 -> "1 skill, offered to the model"
+    active == installed -> "$installed skills, all offered to the model"
+    active == 0 -> "$installed installed · none switched on"
+    else -> "$installed installed · $active offered to the model"
+}
+
+private fun mcpSubtitle(serverCount: Int, toolCount: Int): String = when {
+    serverCount == 0 -> "None attached"
+    toolCount == 0 -> "$serverCount attached · no tools available"
+    else -> {
+        val servers = if (serverCount == 1) "1 server" else "$serverCount servers"
+        val tools = if (toolCount == 1) "1 tool" else "$toolCount tools"
+        "$servers · $tools offered to the model"
+    }
+}
+
+@Composable
+private fun StepperRow(
+    title: String,
+    subtitle: String,
+    help: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    format: (Float) -> String,
+    onChange: (Float) -> Unit,
+) {
+    HelpTooltip(title = title, text = help) {
+        Column(Modifier.padding(vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HelpBadge(title = title, text = help)
+                Text(
+                    text = format(value),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Slider(
+                value = value,
+                onValueChange = onChange,
+                valueRange = range,
+                steps = steps,
+            )
+        }
+    }
+}
+
+/**
+ * Connecting Spotify, which is three things in an order that matters.
+ *
+ * A client ID, then a sign-in, then the switch — and the switch is deliberately last and disabled
+ * until the other two are done. The alternative, a switch that can be turned on before there is an
+ * account behind it, produces the worst possible state: settings that say the feature is on, and a
+ * model that fails every time it tries to use it.
+ *
+ * The redirect URI is shown rather than merely documented because it is the one value that has to
+ * match on both ends, it is invisible from Spotify's side, and getting it wrong produces an error
+ * on Spotify's own page that never mentions Cirrus at all.
+ */
+@Composable
+private fun SpotifyPanel(
+    settings: dev.klaiber.cirrus.domain.model.AppSettings,
+    onClientId: (String) -> Unit,
+    onEnabled: (Boolean) -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    var draft by remember(settings.spotifyClientId) { mutableStateOf(settings.spotifyClientId) }
+    val clipboard = dev.klaiber.cirrus.ui.util.rememberClipboard()
+
+    Column {
+        LabelWithHelp(
+            label = "Client ID",
+            help = "Spotify does not hand out a shared key for apps like this one, so Cirrus uses " +
+                "yours. Create an app at developer.spotify.com/dashboard — it takes a minute and " +
+                "costs nothing — add the redirect URI below to it, and paste the client ID here. " +
+                "There is no client secret: the sign-in uses PKCE, which is designed for apps " +
+                "that cannot keep one.",
+        )
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text("Spotify client ID") },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (draft.trim() != settings.spotifyClientId) {
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { onClientId(draft) }, enabled = draft.isNotBlank()) {
+                Text("Save client ID")
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedPanel(shape = ContainerShape, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Text("Redirect URI", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = SPOTIFY_REDIRECT_URI,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Add this to your Spotify app, exactly as written.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { clipboard.copy(SPOTIFY_REDIRECT_URI) }) { Text("Copy") }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (settings.hasSpotifyAccount) {
+                TextButton(onClick = onDisconnect) { Text("Disconnect") }
+            } else {
+                Button(onClick = onConnect, enabled = settings.spotifyClientId.isNotBlank()) {
+                    Text("Connect Spotify")
+                }
+            }
+        }
+        Text(
+            text = when {
+                settings.spotifyClientId.isBlank() -> "Add a client ID first."
+                !settings.hasSpotifyAccount -> "Opens Spotify in your browser to sign in."
+                settings.spotifyPremium -> "Connected as ${settings.spotifyAccountName} · Premium."
+                else -> "Connected as ${settings.spotifyAccountName}. This account is not Premium, " +
+                    "so Spotify will refuse playback control — the media controls under Tools → " +
+                    "Apps and media still work, on any account."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        SwitchRow(
+            title = "Spotify tools",
+            subtitle = "Search, playlists, what is playing, and playback control",
+            help = "Offers the model five Spotify tools: searching the catalogue, reading your " +
+                "playlists and saved music, seeing what is playing, controlling playback, and " +
+                "editing playlists. Editing needs the write switch under Tools as well. These go " +
+                "to api.spotify.com and nowhere else, and no other key of yours is ever sent " +
+                "there.",
+            checked = settings.spotifyEnabled,
+            onCheckedChange = onEnabled,
+            enabled = settings.hasSpotifyAccount,
+        )
+    }
+}
+
+private const val SPOTIFY_REDIRECT_URI = "cirrus://spotify/callback"
+
+/** Matches Material's disabled content opacity without pulling in the full token set. */
+private const val DISABLED_ALPHA = 0.38f

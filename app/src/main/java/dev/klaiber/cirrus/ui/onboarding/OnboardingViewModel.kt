@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** Where someone's models live. The rest of the wizard is shaped by this one answer. */
-enum class HostChoice { CLOUD, LOCAL_OLLAMA, LM_STUDIO }
+enum class HostChoice { CLOUD, LOCAL }
 
 enum class OnboardingStep { WELCOME, HOST, KEY, MODEL, EXTRAS, DONE }
 
@@ -38,7 +38,6 @@ data class OnboardingUiState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
     val host: HostChoice = HostChoice.CLOUD,
     val localUrl: String = DEFAULT_LOCAL_URL,
-    val lmStudioUrl: String = DEFAULT_LM_STUDIO_URL,
     val apiKey: String = "",
     val hasSavedKey: Boolean = false,
     val probe: ConnectionProbe = ConnectionProbe.Untried,
@@ -51,13 +50,11 @@ data class OnboardingUiState(
     val starterTemplate: AgentTemplate? = null,
 ) {
     val isCloud: Boolean get() = host == HostChoice.CLOUD
-    val isLmStudio: Boolean get() = host == HostChoice.LM_STUDIO
-    val needsApiKey: Boolean get() = isCloud
 
     /** The wizard never blocks, but it can say when a step has not been finished properly. */
     val canAdvance: Boolean
         get() = when (step) {
-            OnboardingStep.KEY -> !needsApiKey || hasSavedKey || apiKey.isNotBlank()
+            OnboardingStep.KEY -> !isCloud || hasSavedKey || apiKey.isNotBlank()
             OnboardingStep.MODEL -> selectedModel.isNotBlank() || models.isEmpty()
             else -> true
         }
@@ -68,7 +65,7 @@ data class OnboardingUiState(
 
     /** A local host needs no API key, so that step is not merely skipped — it never existed. */
     val visibleSteps: List<OnboardingStep>
-        get() = OnboardingStep.entries.filter { it != OnboardingStep.KEY || needsApiKey }
+        get() = OnboardingStep.entries.filter { it != OnboardingStep.KEY || isCloud }
 }
 
 /**
@@ -96,13 +93,8 @@ class OnboardingViewModel @Inject constructor(
         val current = settings.current.value
         _uiState.update { state ->
             state.copy(
-                host = when {
-                    current.baseUrl.contains(OLLAMA_HOST, ignoreCase = true) -> HostChoice.CLOUD
-                    current.baseUrl.trimEnd('/').endsWith("/v1", ignoreCase = true) -> HostChoice.LM_STUDIO
-                    else -> HostChoice.LOCAL_OLLAMA
-                },
-                localUrl = current.baseUrl.takeIf { !it.contains(OLLAMA_HOST) && !it.trimEnd('/').endsWith("/v1", ignoreCase = true) } ?: DEFAULT_LOCAL_URL,
-                lmStudioUrl = current.baseUrl.takeIf { it.trimEnd('/').endsWith("/v1", ignoreCase = true) } ?: DEFAULT_LM_STUDIO_URL,
+                host = if (current.baseUrl.contains(OLLAMA_HOST)) HostChoice.CLOUD else HostChoice.LOCAL,
+                localUrl = current.baseUrl.takeIf { !it.contains(OLLAMA_HOST) } ?: DEFAULT_LOCAL_URL,
                 hasSavedKey = current.hasApiKey,
                 selectedModel = current.defaultModel,
                 gitHubSaved = current.hasGitHubToken,
@@ -118,10 +110,6 @@ class OnboardingViewModel @Inject constructor(
 
     fun setLocalUrl(url: String) = _uiState.update {
         it.copy(localUrl = url, probe = ConnectionProbe.Untried)
-    }
-
-    fun setLmStudioUrl(url: String) = _uiState.update {
-        it.copy(lmStudioUrl = url, probe = ConnectionProbe.Untried)
     }
 
     fun setApiKey(key: String) = _uiState.update {
@@ -152,11 +140,7 @@ class OnboardingViewModel @Inject constructor(
         val state = _uiState.value
         _uiState.update { it.copy(probe = ConnectionProbe.Trying) }
         viewModelScope.launch {
-            val url = when (state.host) {
-                HostChoice.CLOUD -> ApiCredentials.DEFAULT_BASE_URL
-                HostChoice.LOCAL_OLLAMA -> state.localUrl.trim()
-                HostChoice.LM_STUDIO -> state.lmStudioUrl.trim()
-            }
+            val url = if (state.isCloud) ApiCredentials.DEFAULT_BASE_URL else state.localUrl.trim()
             settings.setBaseUrl(url)
             if (state.apiKey.isNotBlank()) settings.setApiKey(state.apiKey)
 
@@ -217,11 +201,7 @@ class OnboardingViewModel @Inject constructor(
         when (state.step) {
             OnboardingStep.HOST -> viewModelScope.launch {
                 settings.setBaseUrl(
-                    when (state.host) {
-                        HostChoice.CLOUD -> ApiCredentials.DEFAULT_BASE_URL
-                        HostChoice.LOCAL_OLLAMA -> state.localUrl.trim()
-                        HostChoice.LM_STUDIO -> state.lmStudioUrl.trim()
-                    },
+                    if (state.isCloud) ApiCredentials.DEFAULT_BASE_URL else state.localUrl.trim(),
                 )
             }
             OnboardingStep.KEY -> if (state.apiKey.isNotBlank()) {
@@ -289,4 +269,3 @@ class OnboardingViewModel @Inject constructor(
 
 /** A phone cannot reach `localhost`; the machine running Ollama has an address on the network. */
 const val DEFAULT_LOCAL_URL = "http://192.168.1.10:11434"
-const val DEFAULT_LM_STUDIO_URL = "http://192.168.1.10:1234/v1"
