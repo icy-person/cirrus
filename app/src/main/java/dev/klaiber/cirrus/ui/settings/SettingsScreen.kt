@@ -1106,14 +1106,16 @@ private fun ApiKeyField(
     Column {
         LabelWithHelp(
             label = "API key",
-            help = "Your Ollama API key, needed for the hosted API at ollama.com. It is stored " +
-                "only on this device, encrypted with a key that lives in the Android Keystore " +
-                "and never leaves it. A local Ollama instance usually needs no key at all.",
+            help = "Needed for the hosted API at ollama.com. A local Ollama instance or LM " +
+                "Studio usually needs no key at all — LM Studio only asks for one if you have " +
+                "turned on \"Require API key\" under its own server settings, in which case any " +
+                "non-empty value here is accepted. Stored only on this device, encrypted with a " +
+                "key that lives in the Android Keystore and never leaves it.",
         )
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it },
-            label = { Text(if (hasKey) "Replace API key" else "Ollama API key") },
+            label = { Text(if (hasKey) "Replace API key" else "API key") },
             placeholder = { Text("ollama api key") },
             singleLine = true,
             // The key is a secret: masked by default, revealable for typo-checking.
@@ -1169,7 +1171,8 @@ private fun ConnectionStatusRow(hasKey: Boolean, status: ConnectionStatus) {
                 text = if (hasKey) {
                     "A key is stored, encrypted with a device-bound key."
                 } else {
-                    "Create one at ollama.com/settings/keys."
+                    "Create one at ollama.com/settings/keys, or leave this blank for a local " +
+                        "Ollama or LM Studio host."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1293,6 +1296,31 @@ private fun GitHubTokenField(
     }
 }
 
+/**
+ * One tap to fill the host field with a known-good address, instead of typing or remembering the
+ * port and the `/v1` suffix that switches Cirrus into OpenAI-compatible mode. Filling the draft
+ * rather than saving immediately keeps this consistent with typing the address by hand: nothing is
+ * applied until "Apply host" is pressed below.
+ */
+@Composable
+private fun HostPresetRow(onSelect: (String) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(bottom = 8.dp),
+    ) {
+        HostPresetChip("Ollama Cloud") { onSelect("https://ollama.com") }
+        HostPresetChip("Local Ollama") { onSelect("http://10.0.2.2:11434") }
+        HostPresetChip("LM Studio") { onSelect("http://10.0.2.2:1234/v1") }
+    }
+}
+
+@Composable
+private fun HostPresetChip(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
 @Composable
 private fun BaseUrlField(baseUrl: String, onSave: (String) -> Unit) {
     var draft by remember(baseUrl) { mutableStateOf(baseUrl) }
@@ -1300,10 +1328,16 @@ private fun BaseUrlField(baseUrl: String, onSave: (String) -> Unit) {
     Column {
         LabelWithHelp(
             label = "Host",
-            help = "Where every request goes. Use https://ollama.com for the hosted API, or " +
-                "http://<address>:11434 for an Ollama instance on your own machine — your " +
-                "hardware, your models, no key. A trailing /api is stripped automatically.",
+            help = "Where every request goes. Use https://ollama.com for the hosted API, " +
+                "http://<address>:11434 for an Ollama instance on your own machine, or " +
+                "http://<address>:1234/v1 for LM Studio. The trailing /v1 is what tells Cirrus " +
+                "to speak LM Studio's OpenAI-compatible API instead of Ollama's — streaming, " +
+                "tool calls and image attachments all work the same way over it. In LM Studio, " +
+                "turn on \"Serve on Local Network\" under the Developer tab so a phone on the " +
+                "same Wi-Fi can reach it, and use that computer's LAN IP address rather than " +
+                "localhost. A trailing /api is stripped automatically.",
         )
+        HostPresetRow(onSelect = { draft = it })
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it },
@@ -1314,7 +1348,9 @@ private fun BaseUrlField(baseUrl: String, onSave: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            text = "Point at a local instance (http://10.0.2.2:11434) to use your own hardware.",
+            text = "10.0.2.2 reaches your computer from the emulator only — on a real phone, " +
+                "replace it with your computer's LAN IP (Settings → Network on most systems) so " +
+                "both devices need to be on the same Wi-Fi.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),

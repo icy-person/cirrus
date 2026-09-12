@@ -415,6 +415,24 @@ private sealed interface ConnectionStatus {
 }
 
 /**
+ * One tap to fill the host field with a known-good address, instead of typing or remembering the
+ * port and the `/v1` suffix that switches Cirrus into OpenAI-compatible mode. Filling the draft
+ * rather than saving immediately keeps this consistent with typing the address by hand: nothing is
+ * applied until "Apply host" is pressed below.
+ */
+@Composable
+private fun HostPresetRow(onSelect: (String) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(bottom = 8.dp),
+    ) {
+        PillButton(label = "Ollama Cloud", style = PillStyle.Secondary, onClick = { onSelect("https://ollama.com") })
+        PillButton(label = "Local Ollama", style = PillStyle.Secondary, onClick = { onSelect("http://localhost:11434") })
+        PillButton(label = "LM Studio", style = PillStyle.Secondary, onClick = { onSelect("http://localhost:1234/v1") })
+    }
+}
+
+/**
  * The connection, and proof that it works.
  *
  * Key first and host second, as on the phone. The order looks backwards written down — the host is
@@ -438,14 +456,16 @@ private fun ConnectionBody(container: AppContainer, settings: AppSettings) {
 
     SecretField(
         label = "API key",
-        fieldLabel = "Ollama API key",
+        fieldLabel = "API key",
         replaceLabel = "Replace API key",
         placeholder = "ollama api key",
         saveLabel = "Save key",
-        help = "Your Ollama API key, needed for the hosted API at ollama.com. A local Ollama " +
-            "instance usually needs no key at all. Unlike the phone build there is no Keystore " +
-            "here to wrap it in: it is a file in Cirrus's own data folder, readable by anything " +
-            "running as you. Settings → Data names the folder.",
+        help = "Needed for the hosted API at ollama.com. A local Ollama instance or LM Studio " +
+            "usually needs no key at all — LM Studio only checks for one if you have turned on " +
+            "\"Require API key\" under its own server settings, in which case any non-empty " +
+            "value here is accepted. Unlike the phone build there is no Keystore here to wrap it " +
+            "in: it is a file in Cirrus's own data folder, readable by anything running as you. " +
+            "Settings → Data names the folder.",
         isSet = settings.hasApiKey,
         footer = "",
         onSave = { key ->
@@ -483,10 +503,16 @@ private fun ConnectionBody(container: AppContainer, settings: AppSettings) {
     Spacer(Modifier.height(12.dp))
     LabelWithHelp(
         label = "Host",
-        help = "Where every request goes. Use https://ollama.com for the hosted API, or " +
-            "http://<address>:11434 for an Ollama instance on your own machine — your hardware, " +
-            "your models, no key. A trailing /api is stripped automatically.",
+        help = "Where every request goes. Use https://ollama.com for the hosted API, " +
+            "http://<address>:11434 for an Ollama instance on your own machine, or " +
+            "http://<address>:1234/v1 for LM Studio. The trailing /v1 is what tells Cirrus to " +
+            "speak LM Studio's OpenAI-compatible API instead of Ollama's — streaming, tool calls " +
+            "and image attachments all work the same way over it. If LM Studio runs on a " +
+            "different machine, turn on \"Serve on Local Network\" under its Developer tab and " +
+            "use that machine's LAN IP rather than localhost. A trailing /api is stripped " +
+            "automatically.",
     )
+    HostPresetRow(onSelect = { host = it })
     OutlinedTextField(
         value = host,
         onValueChange = { host = it },
@@ -497,7 +523,8 @@ private fun ConnectionBody(container: AppContainer, settings: AppSettings) {
         modifier = Modifier.fillMaxWidth(),
     )
     Text(
-        text = "Point at a local instance (http://localhost:11434) to use your own hardware.",
+        text = "Point at a local instance (http://localhost:11434, or " +
+            "http://localhost:1234/v1 for LM Studio) to use your own hardware.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),
@@ -548,7 +575,8 @@ private fun ConnectionStatusRow(hasKey: Boolean, status: ConnectionStatus) {
                 text = if (hasKey) {
                     "A key is stored, as a file in Cirrus's own data folder."
                 } else {
-                    "Create one at ollama.com/settings/keys."
+                    "Create one at ollama.com/settings/keys, or leave this blank for a local " +
+                        "Ollama or LM Studio host."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
