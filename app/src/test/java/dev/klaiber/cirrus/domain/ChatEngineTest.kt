@@ -86,9 +86,14 @@ class ChatEngineTest {
         server = MockWebServer()
         server.start()
         val credentials = ApiCredentials()
-        credentials.update(apiKey = null, baseUrl = server.url("/").toString())
-        val client = OllamaClient(OkHttpClient(), json, credentials)
-        engine = ChatEngine(client, createToolRegistry(client), json)
+        credentials.update(
+            apiKey = "test-key",
+            baseUrl = ApiCredentials.DEFAULT_BASE_URL,
+        )
+        val client = OllamaClient(OkHttpClient(), json, credentials).also {
+            it.webApiBaseUrl = server.url("/").toString()
+        }
+        engine = ChatEngine(client, createToolRegistry(client, credentials), json)
     }
 
     @After
@@ -96,12 +101,11 @@ class ChatEngineTest {
         server.close()
     }
 
-    private fun createToolRegistry(client: OllamaClient): ToolRegistry {
+    private fun createToolRegistry(client: OllamaClient, apiCredentials: ApiCredentials): ToolRegistry {
         val scope = CoroutineScope(UnconfinedTestDispatcher())
         val dataStore = PreferenceDataStoreFactory.create(scope = scope) {
             File(System.getProperty("java.io.tmpdir"), "cirrus-settings-${System.nanoTime()}.preferences_pb")
         }
-        val apiCredentials = ApiCredentials()
         val gitHubCredentials = GitHubCredentials()
         val memoryRepository = MemoryRepository(EmptyMemoryDao())
         val settingsRepository = SettingsRepository(
