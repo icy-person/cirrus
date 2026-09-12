@@ -663,4 +663,3 @@ private fun JsonPrimitive.contentOrNullSafe(): String? =
     } else {
         content.takeIf { it.isNotBlank() }
     }
-```

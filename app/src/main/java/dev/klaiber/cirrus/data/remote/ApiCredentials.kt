@@ -152,8 +152,7 @@ class ApiCredentials @Inject constructor() {
         }
     }
 }
-```
-m/
+        /*
          * -> https://ollama.com
          *
          * http://192.168.1.10:11434/
