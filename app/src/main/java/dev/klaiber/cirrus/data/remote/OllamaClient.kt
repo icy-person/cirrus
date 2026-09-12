@@ -58,6 +58,12 @@ class OllamaClient @Inject constructor(
     private val credentials: ApiCredentials,
 ) {
 
+    /**
+     * Web API endpoint. Production always uses Ollama Cloud; tests can point this at a local
+     * MockWebServer without changing authentication or routing semantics.
+     */
+    internal var webApiBaseUrl: String = ApiCredentials.DEFAULT_BASE_URL
+
     fun streamChat(request: ChatRequestDto): Flow<ChatChunkDto> = flow {
         requireCredentials()
 
@@ -909,7 +915,7 @@ class OllamaClient @Inject constructor(
     ): Request {
         val builder = Request.Builder()
             .url(
-                ApiCredentials.DEFAULT_BASE_URL + path,
+                webApiBaseUrl.trimEnd('/') + path,
             )
             .header(
                 "Accept",
@@ -1118,4 +1124,3 @@ class OllamaClient @Inject constructor(
         const val MAX_INLINE_ERROR_LENGTH = 500
     }
 }
-
