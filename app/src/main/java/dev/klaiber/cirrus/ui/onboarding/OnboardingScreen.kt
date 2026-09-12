@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.OpenInNew
@@ -76,6 +77,7 @@ import dev.klaiber.cirrus.ui.theme.Pill
 private const val KEYS_URL = "https://ollama.com/settings/keys"
 private const val SIGN_UP_URL = "https://ollama.com"
 private const val DOWNLOAD_URL = "https://ollama.com/download"
+private const val LM_STUDIO_DOWNLOAD_URL = "https://lmstudio.ai/download"
 private const val GITHUB_TOKEN_URL = "https://github.com/settings/tokens"
 private const val ELEVENLABS_URL = "https://elevenlabs.io/app/settings/api-keys"
 
@@ -230,7 +232,7 @@ private fun WelcomeStep() {
     )
     Spacer(Modifier.height(8.dp))
     Text(
-        text = "A chat client for Ollama, on your phone.",
+        text = "A chat client for Ollama and LM Studio, on your phone.",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -294,8 +296,9 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
 
     StepHeader(
         title = "Where are your models?",
-        body = "Ollama runs either as a hosted service or on a computer of your own. Both work " +
-            "the same way from here, and you can change your mind later in Settings.",
+        body = "Ollama and LM Studio both run on a computer of your own, and Ollama also offers a " +
+            "hosted API. All three work the same way from here, and you can change your mind " +
+            "later in Settings.",
     )
 
     ChoiceCard(
@@ -309,9 +312,18 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     ChoiceCard(
         selected = state.host == HostChoice.LOCAL,
         icon = Icons.Outlined.Computer,
-        title = "A computer on my network",
+        title = "A computer running Ollama",
         body = "Ollama running at home. Nothing leaves your network, and usually no key at all.",
         onClick = { viewModel.setHost(HostChoice.LOCAL) },
+    )
+    Spacer(Modifier.height(10.dp))
+    ChoiceCard(
+        selected = state.host == HostChoice.LM_STUDIO,
+        icon = Icons.Outlined.DeveloperBoard,
+        title = "A computer running LM Studio",
+        body = "LM Studio at home. Same idea as Ollama, no key needed, and every tool — web " +
+            "search, GitHub, MCP — works the same way once a model with tool support is loaded.",
+        onClick = { viewModel.setHost(HostChoice.LM_STUDIO) },
     )
 
     if (state.host == HostChoice.LOCAL) {
@@ -336,6 +348,34 @@ private fun HostStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
         )
         Spacer(Modifier.height(12.dp))
         LinkButton("Install Ollama") { uriHandler.openUri(DOWNLOAD_URL) }
+
+        Spacer(Modifier.height(16.dp))
+        ProbeRow(state = state, onTest = viewModel::testConnection)
+    }
+
+    if (state.host == HostChoice.LM_STUDIO) {
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(
+            value = state.localUrl,
+            onValueChange = viewModel::setLocalUrl,
+            label = { Text("Address") },
+            placeholder = { Text(DEFAULT_LM_STUDIO_URL) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            shape = ContainerShape,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Your phone cannot reach \"localhost\" either — use the computer's address on " +
+                "your network, keep the \"/v1\" at the end, and turn on \"Serve on Local " +
+                "Network\" next to LM Studio's local server in its Developer tab. Load a model " +
+                "that supports tool calling if you want GitHub, web search or MCP to work.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        LinkButton("Download LM Studio") { uriHandler.openUri(LM_STUDIO_DOWNLOAD_URL) }
 
         Spacer(Modifier.height(16.dp))
         ProbeRow(state = state, onTest = viewModel::testConnection)
@@ -495,11 +535,15 @@ private fun ModelStep(state: OnboardingUiState, viewModel: OnboardingViewModel) 
         StatusPanel(
             ok = false,
             title = "No models yet",
-            body = if (state.isCloud) {
-                "Go back a step and test the connection — the list is filled in from the host."
-            } else {
-                "Nothing is installed on that host. Run \"ollama pull llama3.2\" on the computer " +
-                    "running Ollama, then go back and test again."
+            body = when {
+                state.isCloud ->
+                    "Go back a step and test the connection — the list is filled in from the host."
+                state.isLmStudio ->
+                    "Nothing is loaded on that host. Load a model in LM Studio and start its " +
+                        "local server, then go back and test again."
+                else ->
+                    "Nothing is installed on that host. Run \"ollama pull llama3.2\" on the " +
+                        "computer running Ollama, then go back and test again."
             },
         )
         return

@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 
 /** Where someone's models live. The rest of the wizard is shaped by this one answer. */
-enum class HostChoice { CLOUD, LOCAL }
+enum class HostChoice { CLOUD, LOCAL, LM_STUDIO }
 
 enum class OnboardingStep { WELCOME, HOST, KEY, MODEL, EXTRAS, DONE }
 
@@ -47,6 +47,7 @@ data class OnboardingUiState(
     val starterTemplate: AgentTemplate? = null,
 ) {
     val isCloud: Boolean get() = host == HostChoice.CLOUD
+    val isLmStudio: Boolean get() = host == HostChoice.LM_STUDIO
 
     /** The wizard never blocks, but it can say when a step has not been finished properly. */
     val canAdvance: Boolean
@@ -68,11 +69,11 @@ data class OnboardingUiState(
 /**
  * The first-run wizard.
  *
- * Cirrus is useless until it can reach a model, and the two ways to arrange that — a key from
- * ollama.com, or a machine on your network running Ollama — are both perfectly ordinary and neither
- * is guessable from a blank chat screen. The wizard's real job is not collecting settings; it is
- * proving, before it lets go, that a request actually succeeds. Everything else it asks for is
- * optional and says so.
+ * Cirrus is useless until it can reach a model, and the three ways to arrange that — a key from
+ * ollama.com, a machine on your network running Ollama, or one running LM Studio — are all
+ * perfectly ordinary and none is guessable from a blank chat screen. The wizard's real job is not
+ * collecting settings; it is proving, before it lets go, that a request actually succeeds.
+ * Everything else it asks for is optional and says so.
  */
 /**
  * State for the screen, as a plain class rather than a `ViewModel`.
@@ -96,7 +97,7 @@ class OnboardingModel(
         val current = settings.current.value
         _uiState.update { state ->
             state.copy(
-                host = if (current.baseUrl.contains(OLLAMA_HOST)) HostChoice.CLOUD else HostChoice.LOCAL,
+                host = detectHost(current.baseUrl),
                 localUrl = current.baseUrl.takeIf { !it.contains(OLLAMA_HOST) } ?: DEFAULT_LOCAL_URL,
                 hasSavedKey = current.hasApiKey,
                 selectedModel = current.defaultModel,
@@ -107,8 +108,27 @@ class OnboardingModel(
         }
     }
 
-    fun setHost(choice: HostChoice) = _uiState.update {
-        it.copy(host = choice, probe = ConnectionProbe.Untried)
+    /** Ollama's cloud API and LM Studio's OpenAI-compatible `/v1` are both distinguishable by URL. */
+    private fun detectHost(baseUrl: String): HostChoice = when {
+        baseUrl.contains(OLLAMA_HOST) -> HostChoice.CLOUD
+        baseUrl.trimEnd('/').endsWith("/v1", ignoreCase = true) -> HostChoice.LM_STUDIO
+        else -> HostChoice.LOCAL
+    }
+
+    /**
+     * Switching the host swaps in that host's own default address, but only when the field still
+     * holds a default (or nothing) — anything the person actually typed is left alone.
+     */
+    fun setHost(choice: HostChoice) = _uiState.update { state ->
+        val knownDefault = state.localUrl.isBlank() ||
+            state.localUrl == DEFAULT_LOCAL_URL ||
+            state.localUrl == DEFAULT_LM_STUDIO_URL
+        val newUrl = if (knownDefault) {
+            if (choice == HostChoice.LM_STUDIO) DEFAULT_LM_STUDIO_URL else DEFAULT_LOCAL_URL
+        } else {
+            state.localUrl
+        }
+        state.copy(host = choice, localUrl = newUrl, probe = ConnectionProbe.Untried)
     }
 
     fun setLocalUrl(url: String) = _uiState.update {
@@ -278,3 +298,10 @@ class OnboardingModel(
  * field is pre-filled with something that works rather than something that has to be corrected.
  */
 const val DEFAULT_LOCAL_URL = "http://localhost:11434"
+
+/**
+ * LM Studio's own default port, with the `/v1` suffix [ApiCredentials.isOpenAiCompatible] looks
+ * for. Same reasoning as [DEFAULT_LOCAL_URL]: on a desktop, LM Studio is usually running on this
+ * same machine, so `localhost` is filled in rather than left for the person to supply.
+ */
+const val DEFAULT_LM_STUDIO_URL = "http://localhost:1234/v1"
