@@ -56,65 +56,6 @@ class ApiCredentials @Inject constructor() {
          * ollama.com
          * -> https://ollama.com
          *
-         * https://ollama.co```kotlin
-package dev.klaiber.cirrus.data.remote
-
-import javax.inject.Inject
-import javax.inject.Singleton
-
-/**
- * Snapshot of the connection settings that OkHttp needs synchronously.
- *
- * The settings themselves live in DataStore behind suspending reads, but an
- * [okhttp3.Interceptor] runs on a blocking thread and cannot suspend.
- */
-@Singleton
-class ApiCredentials @Inject constructor() {
-
-    @Volatile
-    var apiKey: String? = null
-        private set
-
-    @Volatile
-    var baseUrl: String = DEFAULT_BASE_URL
-        private set
-
-    fun update(apiKey: String?, baseUrl: String) {
-        this.apiKey = apiKey?.takeIf { it.isNotBlank() }
-        this.baseUrl = normalizeBaseUrl(baseUrl)
-    }
-
-    /**
-     * True when requests can be authenticated or the configured endpoint is local.
-     */
-    fun isConfigured(): Boolean =
-        apiKey != null || !isCloudHost()
-
-    /**
-     * True for Ollama's hosted API.
-     */
-    fun isCloudHost(): Boolean =
-        baseUrl.contains("ollama.com", ignoreCase = true)
-
-    /**
-     * True for OpenAI-compatible endpoints such as LM Studio.
-     */
-    fun isOpenAiCompatible(): Boolean =
-        baseUrl.trimEnd('/')
-            .endsWith("/v1", ignoreCase = true)
-
-    companion object {
-
-        const val DEFAULT_BASE_URL = "https://ollama.com"
-
-        /**
-         * Normalizes a general backend URL.
-         *
-         * Examples:
-         *
-         * ollama.com
-         * -> https://ollama.com
-         *
          * https://ollama.com/
          * -> https://ollama.com
          *
