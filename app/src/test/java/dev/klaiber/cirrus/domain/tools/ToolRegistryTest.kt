@@ -54,18 +54,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * Which tools are offered, and which may actually run.
- *
- * These have to be the same question. `definitions` decides what the model is shown; `find` decides
- * what happens when it names something anyway — carried over from an earlier turn of the same
- * thread, or simply guessed. A gate applied to only one of the two is not a gate, so every case
- * here asserts both halves together.
- *
- * `runBlocking` rather than `runTest`: the repository under test writes through a real DataStore on
- * its own dispatcher, and the barriers below wait on wall-clock time. `runTest`'s virtual clock does
- * not advance while another thread is doing the work we are waiting for.
- */
 class ToolRegistryTest {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -85,10 +73,11 @@ class ToolRegistryTest {
         }
         gitHubCredentials = GitHubCredentials()
         spotifyCredentials = SpotifyCredentials()
+        val apiCredentials = ApiCredentials()
         settings = SettingsRepository(
             dataStore = dataStore,
             secretCipher = SecretCipher(),
-            credentials = ApiCredentials(),
+            credentials = apiCredentials,
             gitHubCredentials = gitHubCredentials,
             elevenLabsCredentials = ElevenLabsCredentials(),
             spotifyCredentials = spotifyCredentials,
@@ -97,7 +86,7 @@ class ToolRegistryTest {
         )
 
         val http = OkHttpClient()
-        val ollama = OllamaClient(http, json, ApiCredentials())
+        val ollama = OllamaClient(http, json, apiCredentials)
         val gitHub = GitHubClient(http, json, gitHubCredentials)
         val mcp = McpClient(StreamableHttpMcpTransport(http), SseMcpTransport(http, json), json)
         val memories = MemoryRepository(InMemoryMemoryDao())
@@ -105,9 +94,6 @@ class ToolRegistryTest {
         registry = ToolRegistry(
             webSearchTool = WebSearchTool(ollama, settings),
             webFetchTool = WebFetchTool(ollama),
-            // Nothing here downloads anything: the workspace is a throwaway directory and no test
-            // below names the tool. It is constructed rather than stubbed so the registry's own
-            // wiring — two switches on one group — is the thing under test.
             downloadFileTool = DownloadFileTool(
                 OkHttpClient(),
                 ShellWorkspace(
@@ -117,7 +103,6 @@ class ToolRegistryTest {
                     ),
                 ),
                 object : DownloadSink {
-                    // Nothing here downloads, so nothing is ever saved for a user who is not there.
                     override suspend fun save(
                         source: File,
                         displayName: String,
@@ -154,8 +139,6 @@ class ToolRegistryTest {
                 RecallTool(memories),
                 ForgetTool(memories),
             ),
-            // An empty store: what is under test is the gate rather than what is behind it, and a
-            // skill list would only make the assertions depend on fixture data.
             skillTools = SkillToolSet(
                 repository = SkillRepository(
                     dataStore = dataStore,
@@ -167,9 +150,6 @@ class ToolRegistryTest {
                 use = StubTool("use_skill"),
             ),
             notificationTool = SendNotificationTool(SilentNotifier()),
-            // Stand-ins: the real device tools need a Context, and what is under test here is the
-            // gate rather than what is behind it. Two entries, because the two lists answer to two
-            // different switches and both halves of each gate have to be exercised.
             deviceTools = DeviceToolSet(
                 shell = listOf(StubTool("run_command")),
                 apps = listOf(StubTool("open_app")),
@@ -182,6 +162,7 @@ class ToolRegistryTest {
             settingsRepository = settings,
             gitHubCredentials = gitHubCredentials,
             spotifyCredentials = spotifyCredentials,
+            apiCredentials = apiCredentials,
         )
     }
 
@@ -196,10 +177,7 @@ class ToolRegistryTest {
     @Test
     fun `web tools are neither offered nor runnable with the switch off`() = runBlocking {
         assertFalse(offeredNames(externalTools = false).contains("web_search"))
-        assertNull(
-            "a model naming web_search with external tools off must be told it is unknown",
-            registry.find("web_search", externalTools = false),
-        )
+        assertNull(registry.find("web_search", externalTools = false))
     }
 
     // ---- Memory and notifications sit outside that switch ---------------------------------
@@ -207,7 +185,6 @@ class ToolRegistryTest {
     @Test
     fun `memory tools are offered even with external tools off`() = runBlocking {
         setMemoryEnabled(true)
-
         assertTrue(offeredNames(externalTools = false).contains("remember"))
         assertNotNull(registry.find("remember", externalTools = false))
     }
@@ -215,52 +192,33 @@ class ToolRegistryTest {
     @Test
     fun `memory tools disappear entirely when memory is switched off`() = runBlocking {
         setMemoryEnabled(false)
-
         assertFalse(offeredNames(externalTools = true).contains("remember"))
         assertNull(registry.find("remember", externalTools = true))
     }
 
-    /**
-     * Skills are local, like memory: the instructions came down when the skill was installed, and
-     * reading one costs nothing that leaves the device. Putting them behind the conversation's
-     * external switch would mean the chooser silently stopped working in most conversations.
-     */
     @Test
-    fun `skill tools are offered even with external tools off, and follow their own switch`() =
-        runBlocking {
-            settings.setSkillsEnabled(true)
-            await("skills on") { settings.current.value.skillsEnabled }
-
-            assertTrue(offeredNames(externalTools = false).contains("use_skill"))
-            assertNotNull(registry.find("use_skill", externalTools = false))
-
-            settings.setSkillsEnabled(false)
-            await("skills off") { !settings.current.value.skillsEnabled }
-
-            assertFalse(offeredNames(externalTools = true).contains("use_skill"))
-            assertNull(registry.find("use_skill", externalTools = true))
-            // Not "unknown tool": the refusal has to name the switch, or the model tells the user
-            // their app cannot do something it shipped with.
-            assertTrue(
-                registry.explainRefusal("use_skill").contains(SettingSwitch.SKILLS.path),
-            )
-        }
+    fun `skill tools are offered even with external tools off, and follow their own switch`() = runBlocking {
+        settings.setSkillsEnabled(true)
+        await("skills on") { settings.current.value.skillsEnabled }
+        assertTrue(offeredNames(externalTools = false).contains("use_skill"))
+        assertNotNull(registry.find("use_skill", externalTools = false))
+        settings.setSkillsEnabled(false)
+        await("skills off") { !settings.current.value.skillsEnabled }
+        assertFalse(offeredNames(externalTools = true).contains("use_skill"))
+        assertNull(registry.find("use_skill", externalTools = true))
+        assertTrue(registry.explainRefusal("use_skill").contains(SettingSwitch.SKILLS.path))
+    }
 
     @Test
     fun `the notification tool follows its own setting`() = runBlocking {
         settings.setNotificationToolEnabled(false)
         await("notifications off") { !settings.current.value.notificationToolEnabled }
-
         assertFalse(offeredNames(externalTools = true).contains("send_notification"))
         assertNull(registry.find("send_notification", externalTools = true))
     }
 
     // ---- The device tools sit outside that switch too ---------------------------------------
 
-    /**
-     * The same argument memory makes: the switch governs what leaves the phone, and the clock does
-     * not. A model that cannot ask what today's date is answers from the year it was trained in.
-     */
     @Test
     fun `shell tools are offered even with external tools off`() = runBlocking {
         assertTrue(offeredNames(externalTools = false).contains("run_command"))
@@ -271,20 +229,16 @@ class ToolRegistryTest {
     fun `shell tools disappear entirely when the setting is off`() = runBlocking {
         settings.setShellToolsEnabled(false)
         await("shell off") { !settings.current.value.shellToolsEnabled }
-
         assertFalse(offeredNames(externalTools = true).contains("run_command"))
         assertNull(registry.find("run_command", externalTools = true))
     }
 
-    /** The one local tool that acts rather than answers, so it starts off. */
     @Test
     fun `app tools are absent by default and appear only when switched on`() = runBlocking {
         assertFalse(offeredNames(externalTools = true).contains("open_app"))
         assertNull(registry.find("open_app", externalTools = true))
-
         settings.setAppControlEnabled(true)
         await("app control on") { settings.current.value.appControlEnabled }
-
         assertTrue(offeredNames(externalTools = false).contains("open_app"))
         assertNotNull(registry.find("open_app", externalTools = false))
     }
@@ -294,50 +248,29 @@ class ToolRegistryTest {
     @Test
     fun `github tools are absent without a token`() = runBlocking {
         configureGitHub(token = null, toolsEnabled = true, writesAllowed = true)
-
         assertTrue(offeredNames(externalTools = true).none { it.startsWith("github_") })
         assertNull(registry.find("github_list_repos", externalTools = true))
     }
 
-    /**
-     * The case the offered/runnable split exists for.
-     *
-     * A token that is still stored while the feature is switched off is an ordinary state — you add
-     * a token, use it, then turn GitHub off. Nothing is offered, correctly. But the model has seen
-     * these names in earlier turns of the same thread, and naming one must not reach GitHub with
-     * the user's personal access token attached.
-     */
     @Test
     fun `a github tool cannot run while the feature is switched off`() = runBlocking {
         configureGitHub(token = "ghp_pretend", toolsEnabled = false, writesAllowed = false)
-
-        assertTrue(
-            "nothing should be offered while GitHub is off",
-            offeredNames(externalTools = true).none { it.startsWith("github_") },
-        )
-        assertNull(
-            "a GitHub tool that was never offered must not resolve",
-            registry.find("github_list_repos", externalTools = true),
-        )
+        assertTrue(offeredNames(externalTools = true).none { it.startsWith("github_") })
+        assertNull(registry.find("github_list_repos", externalTools = true))
     }
 
     @Test
     fun `write tools are withheld unless writes are allowed`() = runBlocking {
         configureGitHub(token = "ghp_pretend", toolsEnabled = true, writesAllowed = false)
-
         val offered = offeredNames(externalTools = true)
-        assertTrue("reads should still be offered", offered.contains("github_list_repos"))
-        assertFalse("writes must not be offered", offered.contains("github_create_issue"))
-        assertNull(
-            "a write tool that was never offered must not resolve",
-            registry.find("github_create_issue", externalTools = true),
-        )
+        assertTrue(offered.contains("github_list_repos"))
+        assertFalse(offered.contains("github_create_issue"))
+        assertNull(registry.find("github_create_issue", externalTools = true))
     }
 
     @Test
     fun `write tools appear once writes are allowed`() = runBlocking {
         configureGitHub(token = "ghp_pretend", toolsEnabled = true, writesAllowed = true)
-
         assertTrue(offeredNames(externalTools = true).contains("github_create_issue"))
         assertNotNull(registry.find("github_create_issue", externalTools = true))
     }
@@ -345,7 +278,6 @@ class ToolRegistryTest {
     @Test
     fun `github tools never run when external tools are off, token or not`() = runBlocking {
         configureGitHub(token = "ghp_pretend", toolsEnabled = true, writesAllowed = true)
-
         assertNull(registry.find("github_list_repos", externalTools = false))
         assertNull(registry.find("github_create_issue", externalTools = false))
     }
@@ -357,17 +289,10 @@ class ToolRegistryTest {
         assertNull(registry.find("definitely_not_a_tool", externalTools = true))
     }
 
-    /**
-     * The invariant that ties the two halves together, over whatever the registry happens to offer.
-     *
-     * Anything the model is shown must be resolvable, or the turn ends in "Unknown tool" for a tool
-     * we ourselves advertised a moment earlier.
-     */
     @Test
     fun `every offered definition carries a name the registry can resolve`() = runBlocking {
         configureGitHub(token = "ghp_pretend", toolsEnabled = true, writesAllowed = true)
         setMemoryEnabled(true)
-
         val offered = offeredNames(externalTools = true)
         assertTrue("expected a non-trivial set of tools", offered.size > 5)
         offered.forEach { name ->
@@ -391,18 +316,6 @@ class ToolRegistryTest {
         await("memory enabled=$enabled") { settings.current.value.memoryEnabled == enabled }
     }
 
-    /**
-     * Puts the two GitHub gates into a known state.
-     *
-     * The token is planted straight onto the credential snapshot rather than written through
-     * settings, because `SecretCipher` needs the Android Keystore: in a JVM test `encrypt` returns
-     * null and `setGitHubToken` therefore stores nothing at all. Planting it is exactly what the
-     * collector in `SettingsRepository` does with a decrypted value, and the token is the only part
-     * of that snapshot the registry reads.
-     *
-     * The flags go through the real DataStore first, and both barriers below have to pass before
-     * the token is planted — otherwise a late emission of that same collector would overwrite it.
-     */
     private suspend fun configureGitHub(
         token: String?,
         toolsEnabled: Boolean,
@@ -420,7 +333,6 @@ class ToolRegistryTest {
         gitHubCredentials.update(token = token, writesAllowed = derivedWrites)
     }
 
-    /** Waits on wall-clock time for a value that another dispatcher is responsible for. */
     private fun await(what: String, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + AWAIT_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
@@ -435,7 +347,6 @@ class ToolRegistryTest {
     }
 }
 
-/** A name and a schema, which is all the registry's gates ever look at. */
 private class StubTool(
     override val name: String,
     override val writes: Boolean = false,
@@ -451,7 +362,6 @@ private class StubTool(
     override suspend fun execute(arguments: JsonObject): String = "{}"
 }
 
-/** There is no notification manager in a JVM test, and nothing here asserts on one. */
 private class SilentNotifier : Notifier {
     override fun notify(
         title: String,
