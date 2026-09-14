@@ -888,6 +888,30 @@ class OllamaClient @Inject constructor(
     }
 
     /**
+     * Builds a request against Ollama Cloud's Web API.
+     *
+     * Uses [webApiBaseUrl] rather than [credentials.baseUrl] directly so that tests can redirect
+     * this traffic to a local `MockWebServer` the same way they do for [buildRequest].
+     */
+    private fun buildWebRequest(path: String, body: String?): Request {
+        val builder = Request.Builder()
+            .url(webApiBaseUrl.trimEnd('/') + path)
+            .header("Accept", "application/json")
+
+        credentials.apiKey
+            ?.takeIf { it.isNotBlank() }
+            ?.let { key ->
+                builder.header("Authorization", "Bearer $key")
+            }
+
+        if (body != null) {
+            builder.post(body.toRequestBody(JSON_MEDIA_TYPE))
+        }
+
+        return builder.build()
+    }
+
+    /**
      * Same as [buildRequest], but against the server root rather than the configured `/v1` base.
      *
      * Used for LM Studio's own `/api/v0/...` routes, which sit next to the OpenAI-compatible
