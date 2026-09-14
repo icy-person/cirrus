@@ -29,7 +29,7 @@ class OllamaClientTest {
         val credentials = ApiCredentials()
         credentials.update(
             apiKey = "test-key",
-            baseUrl = ApiCredentials.DEFAULT_BASE_URL,
+            baseUrl = server.url("/").toString(),
         )
         client = OllamaClient(OkHttpClient(), json, credentials).also {
             it.webApiBaseUrl = server.url("/").toString()
