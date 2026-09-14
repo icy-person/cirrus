@@ -57,6 +57,22 @@ class OllamaClient @Inject constructor(
     private val credentials: ApiCredentials,
 ) {
 
+    private var webApiBaseUrlOverride: String? = null
+
+    /**
+     * The address requests are actually sent to.
+     *
+     * Tracks [ApiCredentials.baseUrl] live unless explicitly overridden, so production code (which
+     * never touches this) keeps picking up a host change from Settings without needing a fresh
+     * client. Tests set this once to redirect traffic to a local `MockWebServer` while leaving
+     * `credentials.baseUrl` at a realistic value, so cloud/LM-Studio detection
+     * ([ApiCredentials.isCloudHost], [ApiCredentials.isOpenAiCompatible]) keeps testing what it
+     * would actually see in production instead of the test server's own plain HTTP URL.
+     */
+    var webApiBaseUrl: String
+        get() = webApiBaseUrlOverride ?: credentials.baseUrl
+        set(value) { webApiBaseUrlOverride = value }
+
     fun streamChat(request: ChatRequestDto): Flow<ChatChunkDto> = flow {
         requireCredentials()
         if (credentials.isOpenAiCompatible()) streamOpenAi(request) else streamOllama(request)
@@ -324,7 +340,7 @@ class OllamaClient @Inject constructor(
     }
 
     private fun buildRequest(path: String, body: String?): Request {
-        val builder = Request.Builder().url(credentials.baseUrl + path).header("Accept", "application/json")
+        val builder = Request.Builder().url(webApiBaseUrl + path).header("Accept", "application/json")
         if (body != null) builder.post(body.toRequestBody(JSON_MEDIA_TYPE))
         return builder.build()
     }
@@ -339,11 +355,11 @@ class OllamaClient @Inject constructor(
         return builder.build()
     }
 
-    /** [ApiCredentials.baseUrl] without its `/v1` suffix, so LM Studio's own `/api/v0/...` routes
-     * can be reached alongside the OpenAI-compatible surface. Case-insensitive because
+    /** [webApiBaseUrl] without its `/v1` suffix, so LM Studio's own `/api/v0/...` routes can be
+     * reached alongside the OpenAI-compatible surface. Case-insensitive because
      * [ApiCredentials.isOpenAiCompatible] is too. */
     private fun lmStudioRoot(): String {
-        val base = credentials.baseUrl
+        val base = webApiBaseUrl
         return if (base.endsWith("/v1", ignoreCase = true)) base.dropLast(3) else base
     }
 
