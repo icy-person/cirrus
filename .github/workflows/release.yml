@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without the v prefix (for example 1.2.3)'
+        required: true
+        type: string
 
 # The publish job creates a release and uploads assets to it.
 permissions:
@@ -11,14 +17,15 @@ permissions:
 jobs:
   # ------------------------------------------------------------------------------------------
   # The tag is the single source of truth for the version, and both modules declare it
-  # separately. Checked once, up front, rather than in each build job: a mismatch should stop
-  # the release before anything spends forty minutes compiling.
+  # separately. For a manual run there is no tag yet, so the requested version becomes the
+  # release tag (for example 1.2.3 -> v1.2.3) and GitHub creates that tag at the selected ref.
   # ------------------------------------------------------------------------------------------
   version:
-    name: Check the tag matches both modules
+    name: Check the release version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.check.outputs.version }}
+      release_tag: ${{ steps.check.outputs.release_tag }}
 
     steps:
       - uses: actions/checkout@v7
@@ -26,21 +33,34 @@ jobs:
       - id: check
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="v${{ inputs.version }}"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version must match vMAJOR.MINOR.PATCH; got $tag"
+            exit 1
+          fi
+
+          version="${tag#v}"
 
           android=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
-          if [ "$tag" != "$android" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match versionName $android in app/build.gradle.kts"
+          if [ "$version" != "$android" ]; then
+            echo "::error::Release version $version does not match versionName $android in app/build.gradle.kts"
             exit 1
           fi
 
           desktop=$(grep -oP 'packageVersion\s*=\s*"\K[^"]+' desktop/build.gradle.kts | head -1)
-          if [ "$tag" != "$desktop" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match packageVersion $desktop in desktop/build.gradle.kts"
+          if [ "$version" != "$desktop" ]; then
+            echo "::error::Release version $version does not match packageVersion $desktop in desktop/build.gradle.kts"
             exit 1
           fi
 
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
 
   # ------------------------------------------------------------------------------------------
   android:
@@ -199,6 +219,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       version: ${{ needs.version.outputs.version }}
+      release_tag: ${{ needs.version.outputs.release_tag }}
 
     steps:
       # Release notes are generated from the range since the previous tag, which needs the full
@@ -232,16 +253,16 @@ jobs:
       - name: Generate release notes
         run: |
           set -euo pipefail
-          previous=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          previous=$(git describe --tags --abbrev=0 "${release_tag}^" 2>/dev/null || true)
           {
             if [ -n "$previous" ]; then
               echo "### Changes since ${previous}"
               echo
-              git log --no-merges --pretty='- %s (%h)' "${previous}..${GITHUB_REF_NAME}"
+              git log --no-merges --pretty='- %s (%h)' "${previous}..HEAD"
             else
               echo "### First release"
               echo
-              git log --no-merges --pretty='- %s (%h)' "${GITHUB_REF_NAME}"
+              git log --no-merges --pretty='- %s (%h)' HEAD
             fi
             echo
             echo "### Downloads"
@@ -275,7 +296,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$release_tag" \
+            --target "$GITHUB_SHA" \
             --title "Cirrus ${version}" \
             --notes-file release-notes.md \
             dist/*

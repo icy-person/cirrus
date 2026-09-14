@@ -1,5 +1,9 @@
 pluginManagement {
     repositories {
+        maven {
+            url = uri("https://maven.myket.ir/")
+        }
+
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -15,6 +19,10 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven {
+            url = uri("https://maven.myket.ir/")
+        }
+
         google()
         mavenCentral()
     }

@@ -194,7 +194,17 @@ class OllamaClient @Inject constructor(
 
     suspend fun showModel(model: String): ShowResponseDto = withContext(Dispatchers.IO) {
         if (credentials.isOpenAiCompatible()) {
-            lmStudioShowModel(model) ?: ShowResponseDto(remoteModel = model, remoteHost = credentials.baseUrl)
+            // There is no `/api/show`-equivalent on an OpenAI-compatible host such as LM Studio,
+            // so nothing here is actually probed. `completion` and `tools` are reported anyway,
+            // rather than an empty set, because every model an OpenAI-style `/chat/completions`
+            // endpoint serves supports both — Cirrus already sends `tools` on every such request
+            // regardless of this badge. Context length, family and quantisation stay null: unlike
+            // capabilities, those vary per model and guessing them would be actively misleading.
+            ShowResponseDto(
+                capabilities = listOf("completion", "tools"),
+                remoteModel = model,
+                remoteHost = credentials.baseUrl,
+            )
         } else {
             val payload = json.encodeToString(ShowRequestDto.serializer(), ShowRequestDto(model))
             executeForJson(httpClient.newCall(buildRequest("/api/show", payload)), ShowResponseDto.serializer())

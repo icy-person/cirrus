@@ -27,8 +27,13 @@ class OllamaClientTest {
         server = MockWebServer()
         server.start()
         val credentials = ApiCredentials()
-        credentials.update(apiKey = null, baseUrl = server.url("/").toString())
-        client = OllamaClient(OkHttpClient(), json, credentials)
+        credentials.update(
+            apiKey = "test-key",
+            baseUrl = ApiCredentials.DEFAULT_BASE_URL,
+        )
+        client = OllamaClient(OkHttpClient(), json, credentials).also {
+            it.webApiBaseUrl = server.url("/").toString()
+        }
     }
 
     @After
@@ -196,6 +201,7 @@ class OllamaClientTest {
 
         val request = server.takeRequest()
         assertEquals("/api/web_search", request.url.encodedPath)
+        assertEquals("Bearer test-key", request.headers["Authorization"])
         val body = request.body!!.utf8()
         assertTrue(body.contains("\"query\":\"test query\""))
         assertTrue(body.contains("\"max_results\":3"))

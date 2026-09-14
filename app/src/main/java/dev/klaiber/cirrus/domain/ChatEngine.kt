@@ -250,6 +250,7 @@ class ChatEngine @Inject constructor(
         id = UUID.randomUUID().toString(),
         name = call.function.name,
         argumentsJson = call.function.arguments.toString(),
+        toolCallId = call.id,
     )
 
     private fun toolResultMessage(invocation: ToolInvocation) = MessageDto(
@@ -257,6 +258,7 @@ class ChatEngine @Inject constructor(
         content = invocation.resultJson
             ?: """{"error":${JsonPrimitive(invocation.errorMessage ?: "failed")}}""",
         toolName = invocation.name,
+        toolCallId = invocation.toolCallId,
     )
 
     /** Addressed to the model: it is the one that has to decide what to do about it. */
