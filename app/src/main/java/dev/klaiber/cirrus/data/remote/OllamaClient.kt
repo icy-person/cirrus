@@ -58,11 +58,21 @@ class OllamaClient @Inject constructor(
     private val credentials: ApiCredentials,
 ) {
 
+    private var webApiBaseUrlOverride: String? = null
+
     /**
-     * Web API endpoint. Production always uses Ollama Cloud; tests can point this at a local
-     * MockWebServer without changing authentication or routing semantics.
+     * The address requests are actually sent to.
+     *
+     * Tracks [ApiCredentials.baseUrl] live unless explicitly overridden, so production code (which
+     * never touches this) keeps picking up a host change from Settings without needing a fresh
+     * client. Tests set this once to redirect traffic to a local `MockWebServer` while leaving
+     * `credentials.baseUrl` at a realistic value, so cloud/LM-Studio detection
+     * ([ApiCredentials.isCloudHost], [ApiCredentials.isOpenAiCompatible]) keeps testing what it
+     * would actually see in production instead of the test server's own plain HTTP URL.
      */
-    internal var webApiBaseUrl: String = ApiCredentials.DEFAULT_BASE_URL
+    var webApiBaseUrl: String
+        get() = webApiBaseUrlOverride ?: credentials.baseUrl
+        set(value) { webApiBaseUrlOverride = value }
 
     fun streamChat(request: ChatRequestDto): Flow<ChatChunkDto> = flow {
         requireCredentials()
@@ -871,70 +881,31 @@ class OllamaClient @Inject constructor(
         }
     }
 
-    /**
-     * Builds a request against the configured model backend.
-     *
-     * Examples:
-     *
-     * Ollama local:
-     * http://192.168.1.10:11434/api/chat
-     *
-     * LM Studio:
-     * http://192.168.1.10:1234/v1/chat/completions
-     */
-    private fun buildRequest(
-        path: String,
-        body: String?,
-    ): Request {
-        val builder = Request.Builder()
-            .url(credentials.baseUrl + path)
-            .header(
-                "Accept",
-                "application/json",
-            )
-
-        if (body != null) {
-            builder.post(
-                body.toRequestBody(JSON_MEDIA_TYPE),
-            )
-        }
-
+    private fun buildRequest(path: String, body: String?): Request {
+        val builder = Request.Builder().url(webApiBaseUrl + path).header("Accept", "application/json")
+        if (body != null) builder.post(body.toRequestBody(JSON_MEDIA_TYPE))
         return builder.build()
     }
 
     /**
      * Builds a request against Ollama Cloud's Web API.
      *
-     * Deliberately does not use [credentials.baseUrl], because that URL belongs to the
-     * model provider. When Cirrus is configured for LM Studio, for example, the model
-     * base URL is `/v1` while the Web API still lives under `ollama.com`.
+     * Uses [webApiBaseUrl] rather than [credentials.baseUrl] directly so that tests can redirect
+     * this traffic to a local `MockWebServer` the same way they do for [buildRequest].
      */
-    private fun buildWebRequest(
-        path: String,
-        body: String?,
-    ): Request {
+    private fun buildWebRequest(path: String, body: String?): Request {
         val builder = Request.Builder()
-            .url(
-                webApiBaseUrl.trimEnd('/') + path,
-            )
-            .header(
-                "Accept",
-                "application/json",
-            )
+            .url(webApiBaseUrl.trimEnd('/') + path)
+            .header("Accept", "application/json")
 
         credentials.apiKey
             ?.takeIf { it.isNotBlank() }
             ?.let { key ->
-                builder.header(
-                    "Authorization",
-                    "Bearer $key",
-                )
+                builder.header("Authorization", "Bearer $key")
             }
 
         if (body != null) {
-            builder.post(
-                body.toRequestBody(JSON_MEDIA_TYPE),
-            )
+            builder.post(body.toRequestBody(JSON_MEDIA_TYPE))
         }
 
         return builder.build()
@@ -968,27 +939,12 @@ class OllamaClient @Inject constructor(
         return builder.build()
     }
 
-    /**
-     * Removes `/v1` from the configured OpenAI-compatible base URL.
-     *
-     * Example:
-     *
-     * http://192.168.1.10:1234/v1
-     * -> http://192.168.1.10:1234
-     */
+    /** [webApiBaseUrl] without its `/v1` suffix, so LM Studio's own `/api/v0/...` routes can be
+     * reached alongside the OpenAI-compatible surface. Case-insensitive because
+     * [ApiCredentials.isOpenAiCompatible] is too. */
     private fun lmStudioRoot(): String {
-        val base = credentials.baseUrl
-
-        return if (
-            base.endsWith(
-                "/v1",
-                ignoreCase = true,
-            )
-        ) {
-            base.dropLast(3)
-        } else {
-            base
-        }
+        val base = webApiBaseUrl
+        return if (base.endsWith("/v1", ignoreCase = true)) base.dropLast(3) else base
     }
 
     private fun executeText(
