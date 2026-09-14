@@ -88,7 +88,7 @@ class ChatEngineTest {
         val credentials = ApiCredentials()
         credentials.update(
             apiKey = "test-key",
-            baseUrl = ApiCredentials.DEFAULT_BASE_URL,
+            baseUrl = server.url("/").toString(),
         )
         val client = OllamaClient(OkHttpClient(), json, credentials).also {
             it.webApiBaseUrl = server.url("/").toString()
@@ -111,7 +111,7 @@ class ChatEngineTest {
         val settingsRepository = SettingsRepository(
             dataStore = dataStore,
             secretCipher = SecretCipher(),
-            credentials = apiCredentials,
+            credentials = ApiCredentials(),
             gitHubCredentials = gitHubCredentials,
             elevenLabsCredentials = ElevenLabsCredentials(),
             spotifyCredentials = SpotifyCredentials(),
@@ -211,8 +211,6 @@ class ChatEngineTest {
         )
     }
 
-    // ---- Helpers ---------------------------------------------------------------------------
-
     private fun conversation(
         toolsEnabled: Boolean = false,
         systemPrompt: String? = null,
@@ -255,7 +253,6 @@ class ChatEngineTest {
         )
         .build()
 
-    /** One streamed reply whose whole content is [content], escaped as the wire would carry it. */
     private fun titleResponse(content: String) = MockResponse.Builder()
         .body(
             """
@@ -268,8 +265,6 @@ class ChatEngineTest {
     private fun searchResponse() = MockResponse.Builder()
         .body("""{"results":[{"title":"Result","url":"https://example.com","content":"Snippet"}]}""")
         .build()
-
-    // ---- Streaming ------------------------------------------------------------------------
 
     @Test
     fun `streams content deltas and finishes with stats`() = runTest {
@@ -348,8 +343,6 @@ class ChatEngineTest {
         assertTrue(body.contains(""""content":"three""""))
         assertFalse(body.contains(""""content":"one""""))
     }
-
-    // ---- Tool loop ------------------------------------------------------------------------
 
     @Test
     fun `executes tool calls and feeds results back`() = runTest {
@@ -450,8 +443,6 @@ class ChatEngineTest {
         assertEquals(4, server.requestCount)
     }
 
-    // ---- Interrupted streams -----------------------------------------------------------------
-
     @Test
     fun `surfaces a stream cut short after content as an error`() = runTest {
         server.enqueue(
@@ -500,8 +491,6 @@ class ChatEngineTest {
         )
         assertTrue(events.filterIsInstance<TurnEvent.Finished>().isNotEmpty())
     }
-
-    // ---- Titles and errors -----------------------------------------------------------------
 
     @Test
     fun `suggests a title from the first response line`() = runTest {
